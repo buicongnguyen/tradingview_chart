@@ -1,0 +1,8 @@
+<RCC>
+  <qresource prefix="/web">
+    <file>assets/web/index.html</file>
+    <file>assets/web/chart.js</file>
+    <file>assets/web/styles.css</file>
+    <file>assets/web/vendor/lightweight-charts.standalone.production.js</file>
+  </qresource>
+</RCC>

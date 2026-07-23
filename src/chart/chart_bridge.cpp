@@ -1,0 +1,91 @@
+#include "chart/chart_bridge.hpp"
+
+#include <QJsonObject>
+
+namespace tvchart {
+
+ChartBridge::ChartBridge(QObject* parent)
+    : QObject(parent) {}
+
+bool ChartBridge::setSeries(QString symbol, QString timeframe, Bars bars) {
+    if (const auto error = validateBars(bars)) {
+        emit errorReported(QString::fromStdString(*error));
+        return false;
+    }
+
+    symbol_ = std::move(symbol);
+    timeframe_ = std::move(timeframe);
+    bars_ = std::move(bars);
+    if (ready_) {
+        emit seriesChanged(symbol_, timeframe_, toJson(bars_));
+    }
+    return true;
+}
+
+void ChartBridge::setDarkTheme(const bool dark) {
+    dark_ = dark;
+    if (ready_) {
+        emit themeChanged(dark_);
+    }
+}
+
+void ChartBridge::setChartStyle(QString style) {
+    if (style != QStringLiteral("candlestick") &&
+        style != QStringLiteral("line") &&
+        style != QStringLiteral("area")) {
+        emit errorReported(QStringLiteral("Unsupported chart style: %1").arg(style));
+        return;
+    }
+    style_ = std::move(style);
+    if (ready_) {
+        emit chartStyleChanged(style_);
+    }
+}
+
+void ChartBridge::requestFit() {
+    if (ready_) {
+        emit fitRequested();
+    }
+}
+
+bool ChartBridge::isReady() const noexcept {
+    return ready_;
+}
+
+void ChartBridge::webReady() {
+    if (ready_) {
+        return;
+    }
+    ready_ = true;
+    publishState();
+    emit ready();
+}
+
+void ChartBridge::reportError(const QString& message) {
+    emit errorReported(message);
+}
+
+void ChartBridge::publishState() {
+    emit themeChanged(dark_);
+    emit chartStyleChanged(style_);
+    if (!bars_.empty()) {
+        emit seriesChanged(symbol_, timeframe_, toJson(bars_));
+    }
+}
+
+QJsonArray ChartBridge::toJson(const Bars& bars) {
+    QJsonArray output;
+    for (const auto& bar : bars) {
+        output.append(QJsonObject{
+            {QStringLiteral("time"), bar.timestamp},
+            {QStringLiteral("open"), bar.open},
+            {QStringLiteral("high"), bar.high},
+            {QStringLiteral("low"), bar.low},
+            {QStringLiteral("close"), bar.close},
+            {QStringLiteral("volume"), bar.volume},
+        });
+    }
+    return output;
+}
+
+} // namespace tvchart

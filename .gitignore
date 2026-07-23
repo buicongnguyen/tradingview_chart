@@ -1,0 +1,11 @@
+/.qt/
+/.tools/
+/build*/
+/dist/
+/node_modules/
+/.vs/
+/.vscode/
+/CMakeUserPresets.json
+*.user
+*.log
+*.zip

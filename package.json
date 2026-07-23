@@ -1,0 +1,16 @@
+{
+  "name": "tradingview-chart-assets",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pinned web assets for the TradingView Chart Qt application",
+  "engines": {
+    "node": ">=22.3"
+  },
+  "scripts": {
+    "sync-web-deps": "node scripts/sync-web-deps.mjs",
+    "test:web": "node --test tests/web/*.test.mjs"
+  },
+  "dependencies": {
+    "lightweight-charts": "5.2.0"
+  }
+}
