@@ -27,7 +27,8 @@ jobs:
           npm ci
           npm run sync-web-deps
           npm run test:web
-          if (-not (git diff --exit-code)) {
+          git diff --exit-code
+          if ($LASTEXITCODE -ne 0) {
             throw 'Pinned web assets are not synchronized.'
           }
 
