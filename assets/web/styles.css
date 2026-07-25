@@ -45,9 +45,13 @@ body {
 }
 
 #timeframe,
+#indicator,
 #source {
   color: #787b86;
   font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #source {
@@ -87,6 +91,7 @@ body.light #symbol {
 }
 
 body.light #timeframe,
+body.light #indicator,
 body.light #source {
   color: #5d606b;
 }

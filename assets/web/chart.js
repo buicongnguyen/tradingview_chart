@@ -5,6 +5,7 @@
   const loading = document.getElementById("loading");
   const symbolLabel = document.getElementById("symbol");
   const timeframeLabel = document.getElementById("timeframe");
+  const indicatorLabel = document.getElementById("indicator");
   const sourceLabel = document.getElementById("source");
 
   let bridge = null;
@@ -12,6 +13,7 @@
   let style = "candlestick";
   let bars = [];
   let priceSeries = null;
+  let indicatorSeries = [];
 
   const colors = () => dark
     ? {
@@ -200,6 +202,132 @@
     createPriceSeries();
   }
 
+  function clearIndicatorSeries() {
+    for (const series of indicatorSeries) {
+      chart.removeSeries(series);
+    }
+    indicatorSeries = [];
+
+    const panes = chart.panes();
+    for (let index = panes.length - 1; index >= 1; --index) {
+      if (panes[index].getSeries().length === 0) {
+        chart.removePane(index);
+      }
+    }
+  }
+
+  function indicatorPoints(values) {
+    return Array.from(values ?? [], (point) => ({
+      time: Number(point.time),
+      value: Number(point.value),
+    }));
+  }
+
+  function setIndicator(calculation) {
+    clearIndicatorSeries();
+    const kind = String(calculation?.kind ?? "none");
+    const label = String(calculation?.label ?? "None");
+    const primary = indicatorPoints(calculation?.primary);
+    const secondary = indicatorPoints(calculation?.secondary);
+    const histogram = indicatorPoints(calculation?.histogram);
+    indicatorLabel.textContent =
+      kind !== "none" && primary.length === 0
+        ? `${label} · warming up`
+        : label;
+
+    if (kind === "none" || primary.length === 0) {
+      return;
+    }
+
+    if (["sma", "ema", "vwap"].includes(kind)) {
+      const color = kind === "sma"
+        ? "#ff9800"
+        : kind === "ema"
+          ? "#ab47bc"
+          : "#00acc1";
+      const overlay = chart.addSeries(LightweightCharts.LineSeries, {
+        color,
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+        crosshairMarkerVisible: true,
+      });
+      overlay.setData(primary);
+      indicatorSeries.push(overlay);
+      return;
+    }
+
+    if (kind === "rsi") {
+      const rsi = chart.addSeries(LightweightCharts.LineSeries, {
+        color: "#7e57c2",
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      }, 1);
+      rsi.setData(primary);
+      rsi.createPriceLine({
+        price: 70,
+        color: "#ef535088",
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        lineWidth: 1,
+        axisLabelVisible: true,
+        title: "70",
+      });
+      rsi.createPriceLine({
+        price: 30,
+        color: "#26a69a88",
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        lineWidth: 1,
+        axisLabelVisible: true,
+        title: "30",
+      });
+      indicatorSeries.push(rsi);
+    } else if (kind === "macd") {
+      const histogramSeries = chart.addSeries(
+        LightweightCharts.HistogramSeries,
+        {
+          base: 0,
+          lastValueVisible: false,
+          priceLineVisible: false,
+        },
+        1,
+      );
+      histogramSeries.setData(histogram.map((point) => ({
+        ...point,
+        color: point.value >= 0 ? "#26a69a99" : "#ef535099",
+      })));
+      histogramSeries.createPriceLine({
+        price: 0,
+        color: "#787b8688",
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        lineWidth: 1,
+        axisLabelVisible: false,
+      });
+
+      const macd = chart.addSeries(LightweightCharts.LineSeries, {
+        color: "#ffc107",
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      }, 1);
+      macd.setData(primary);
+      const signal = chart.addSeries(LightweightCharts.LineSeries, {
+        color: "#42a5f5",
+        lineWidth: 2,
+        lastValueVisible: true,
+        priceLineVisible: false,
+      }, 1);
+      signal.setData(secondary);
+      indicatorSeries.push(histogramSeries, macd, signal);
+    }
+
+    const panes = chart.panes();
+    if (panes.length > 1) {
+      panes[0].setStretchFactor(3);
+      panes[1].setStretchFactor(1);
+    }
+  }
+
   function setBars(symbol, timeframe, source, values) {
     const nextBars = Array.from(values, normalizeBar);
     const rangesOverlap =
@@ -260,6 +388,13 @@
       bridge.chartStyleChanged.connect((value) => {
         try {
           setStyle(value);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.indicatorChanged.connect((calculation) => {
+        try {
+          setIndicator(calculation);
         } catch (error) {
           reportError(error);
         }

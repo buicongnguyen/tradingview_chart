@@ -17,6 +17,11 @@ rate limits, terms, and market-data display rights still apply.
 - Qt Widgets desktop shell with an embedded, local Qt WebEngine chart.
 - Candlestick, line, and area display modes.
 - Volume overlay, crosshair, pan, zoom, fit-to-data, and light/dark themes.
+- Locally calculated SMA (20), EMA (20), UTC-session VWAP, RSI (14), and
+  MACD (12, 26, 9), including oscillator panes and explicit warm-up behavior.
+- A calculated-information panel with latest close, last-bar change, loaded
+  high/low range, range position, average volume (20), and current indicator
+  values.
 - Yahoo Finance chart data as the default online source.
 - Optional Twelve Data REST fallback configured through an environment variable.
 - Deterministic offline demo data for a small watchlist and five timeframes.
@@ -59,6 +64,17 @@ Choose **File → Load offline demo** to avoid network requests. CSV data remain
 local. If both online providers fail, the application shows an offline fallback
 and retries later.
 
+## Technical calculations
+
+The indicator engine consumes the same validated bars shown on the chart. SMA
+and EMA use closing prices. VWAP uses typical price `(high + low + close) / 3`,
+weighted by volume, and resets at each UTC-day boundary. RSI uses Wilder
+smoothing, and MACD uses 12/26-period EMAs with a 9-period signal EMA.
+
+Warm-up values are omitted until the required number of bars exists. All
+calculations are descriptive views of historical input; they are not price
+forecasts, trading recommendations, or guarantees of future results.
+
 ## Data boundary
 
 Lightweight Charts accepts application-supplied arrays through methods such as
@@ -68,8 +84,9 @@ data rights. This repository deliberately separates:
 1. `Bar` domain values and validation;
 2. online acquisition and provider-specific JSON parsing;
 3. offline sources (`DemoDataSource` and `CsvBarLoader`);
-4. the Qt/WebChannel bridge; and
-5. the JavaScript chart renderer.
+4. provider-independent technical calculations and summary statistics;
+5. the Qt/WebChannel bridge; and
+6. the JavaScript chart renderer.
 
 ## Prerequisites
 

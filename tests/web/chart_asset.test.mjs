@@ -10,6 +10,7 @@ test("embedded page has no runtime CDN dependency", async () => {
   assert.doesNotMatch(html, /https?:\/\//i);
   assert.match(html, /connect-src 'none'/);
   assert.match(html, /vendor\/lightweight-charts\.standalone\.production\.js/);
+  assert.match(html, /id="indicator"/);
 });
 
 test("renderer keeps attribution and receives application data", async () => {
@@ -18,6 +19,10 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /attributionLogo:\s*true/);
   assert.match(source, /priceSeries\.setData/);
   assert.match(source, /bridge\.seriesChanged\.connect/);
+  assert.match(source, /bridge\.indicatorChanged\.connect/);
+  assert.match(source, /LightweightCharts\.LineSeries/);
+  assert.match(source, /LightweightCharts\.HistogramSeries/);
+  assert.match(source, /chart\.removePane/);
   assert.match(source, /sourceLabel\.textContent\s*=\s*String\(source\)/);
   assert.match(source, /const rangesOverlap\s*=/);
   assert.match(source, /if \(shouldFit\)/);

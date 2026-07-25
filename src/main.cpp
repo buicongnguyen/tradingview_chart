@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QComboBox>
 #include <QDebug>
 #include <QTimer>
 
@@ -62,11 +63,48 @@ int main(int argc, char* argv[]) {
             qCritical() << "SMOKE_TIMEOUT";
             application.exit(2);
         });
+        auto* chartView = window.findChild<tvchart::ChartView*>();
+        if (!chartView) {
+            qCritical() << "SMOKE_CHART_VIEW_MISSING";
+            return 4;
+        }
+        QObject::connect(
+            chartView,
+            &tvchart::ChartView::chartError,
+            &application,
+            [&application](const QString& message) {
+                qCritical() << "SMOKE_CHART_ERROR" << message;
+                application.exit(3);
+            });
         QObject::connect(&window, &tvchart::MainWindow::chartReady, &application, [&]() {
-            qInfo() << "SMOKE_OK";
-            timeout.stop();
-            window.close();
-            QTimer::singleShot(1'000, &application, [&application]() {
+            auto* indicatorSelector =
+                window.findChild<QComboBox*>(QStringLiteral("indicatorSelector"));
+            if (!indicatorSelector) {
+                qCritical() << "SMOKE_INDICATOR_SELECTOR_MISSING";
+                application.exit(4);
+                return;
+            }
+            indicatorSelector->setCurrentIndex(
+                indicatorSelector->findData(
+                    static_cast<int>(
+                        tvchart::IndicatorKind::RelativeStrengthIndex)));
+            QTimer::singleShot(250, &window, [indicatorSelector]() {
+                indicatorSelector->setCurrentIndex(
+                    indicatorSelector->findData(
+                        static_cast<int>(
+                            tvchart::IndicatorKind::
+                                MovingAverageConvergenceDivergence)));
+            });
+            QTimer::singleShot(500, &window, [indicatorSelector]() {
+                indicatorSelector->setCurrentIndex(
+                    indicatorSelector->findData(
+                        static_cast<int>(
+                            tvchart::IndicatorKind::SimpleMovingAverage)));
+            });
+            QTimer::singleShot(750, &application, [&]() {
+                qInfo() << "SMOKE_OK";
+                timeout.stop();
+                window.close();
                 application.exit(0);
             });
         });

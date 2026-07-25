@@ -47,6 +47,13 @@ void ChartBridge::setChartStyle(QString style) {
     }
 }
 
+void ChartBridge::setIndicator(IndicatorCalculation calculation) {
+    indicator_ = std::move(calculation);
+    if (ready_) {
+        emit indicatorChanged(toJson(indicator_));
+    }
+}
+
 void ChartBridge::requestFit() {
     if (ready_) {
         emit fitRequested();
@@ -76,6 +83,7 @@ void ChartBridge::publishState() {
     if (!bars_.empty()) {
         emit seriesChanged(symbol_, timeframe_, source_, toJson(bars_));
     }
+    emit indicatorChanged(toJson(indicator_));
 }
 
 QJsonArray ChartBridge::toJson(const Bars& bars) {
@@ -91,6 +99,40 @@ QJsonArray ChartBridge::toJson(const Bars& bars) {
         });
     }
     return output;
+}
+
+QJsonObject ChartBridge::toJson(
+    const IndicatorCalculation& calculation) {
+    const auto kindId = indicatorId(calculation.kind);
+    const auto label = indicatorLabel(calculation.kind);
+    const auto pointsToJson = [](const std::vector<IndicatorPoint>& points) {
+        QJsonArray output;
+        for (const auto& point : points) {
+            output.append(QJsonObject{
+                {QStringLiteral("time"), point.timestamp},
+                {QStringLiteral("value"), point.value},
+            });
+        }
+        return output;
+    };
+
+    return {
+        {
+            QStringLiteral("kind"),
+            QString::fromLatin1(
+                kindId.data(),
+                static_cast<qsizetype>(kindId.size())),
+        },
+        {
+            QStringLiteral("label"),
+            QString::fromLatin1(
+                label.data(),
+                static_cast<qsizetype>(label.size())),
+        },
+        {QStringLiteral("primary"), pointsToJson(calculation.primary)},
+        {QStringLiteral("secondary"), pointsToJson(calculation.secondary)},
+        {QStringLiteral("histogram"), pointsToJson(calculation.histogram)},
+    };
 }
 
 } // namespace tvchart

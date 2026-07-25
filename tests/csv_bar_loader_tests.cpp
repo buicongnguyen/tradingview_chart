@@ -278,21 +278,37 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
         QStringLiteral("5m"),
         QStringLiteral("Yahoo Finance"),
         bars));
+    bridge.setIndicator({
+        .kind = tvchart::IndicatorKind::SimpleMovingAverage,
+        .primary = {{
+            .timestamp = 1'700'000'000,
+            .value = 101.5,
+        }},
+    });
 
     QSignalSpy seriesSpy(&bridge, &tvchart::ChartBridge::seriesChanged);
+    QSignalSpy indicatorSpy(&bridge, &tvchart::ChartBridge::indicatorChanged);
     QSignalSpy readySpy(&bridge, &tvchart::ChartBridge::ready);
 
     bridge.webReady();
     QCOMPARE(seriesSpy.count(), 1);
+    QCOMPARE(indicatorSpy.count(), 1);
     QCOMPARE(readySpy.count(), 1);
     const auto firstArguments = seriesSpy.takeFirst();
     QCOMPARE(firstArguments.at(0).toString(), QStringLiteral("AAPL"));
     QCOMPARE(firstArguments.at(1).toString(), QStringLiteral("5m"));
     QCOMPARE(firstArguments.at(2).toString(), QStringLiteral("Yahoo Finance"));
     QCOMPARE(firstArguments.at(3).toJsonArray().size(), 1);
+    const auto indicatorArguments = indicatorSpy.takeFirst();
+    const auto indicator = indicatorArguments.at(0).toJsonObject();
+    QCOMPARE(indicator.value(QStringLiteral("kind")).toString(), QStringLiteral("sma"));
+    QCOMPARE(
+        indicator.value(QStringLiteral("primary")).toArray().size(),
+        1);
 
     bridge.webReady();
     QCOMPARE(seriesSpy.count(), 1);
+    QCOMPARE(indicatorSpy.count(), 1);
     QCOMPARE(readySpy.count(), 1);
 }
 

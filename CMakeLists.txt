@@ -28,6 +28,8 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/vendor/lightweight-charts.
 endif()
 
 add_library(tradingview_chart_core
+    src/analysis/technical_indicators.cpp
+    src/analysis/technical_indicators.hpp
     src/chart/chart_bridge.cpp
     src/chart/chart_bridge.hpp
     src/domain/bar.cpp
@@ -89,7 +91,24 @@ if(TRADINGVIEW_CHART_BUILD_TESTS)
         Qt6::Test
     )
     add_test(NAME tradingview_chart_tests COMMAND tradingview_chart_tests)
-    set_tests_properties(tradingview_chart_tests PROPERTIES
+
+    add_executable(tradingview_chart_indicator_tests
+        tests/technical_indicators_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_indicator_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_indicator_tests
+        COMMAND tradingview_chart_indicator_tests
+    )
+
+    set_tests_properties(
+        tradingview_chart_tests
+        tradingview_chart_indicator_tests
+        PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
     )

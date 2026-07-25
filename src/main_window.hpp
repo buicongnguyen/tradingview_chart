@@ -1,5 +1,6 @@
 #pragma once
 
+#include "analysis/technical_indicators.hpp"
 #include "chart/chart_view.hpp"
 #include "domain/bar.hpp"
 
@@ -41,6 +42,12 @@ private:
     void loadMarketData();
     void loadDemo();
     void showDemo(const QString& source, const QString& detail);
+    bool applySeries(
+        const QString& symbol,
+        const QString& timeframe,
+        const QString& source,
+        Bars bars);
+    void updateTechnicalAnalysis();
     void scheduleRefresh(Timeframe timeframe);
     void openCsv();
     void applyTheme(bool dark);
@@ -48,6 +55,7 @@ private:
     [[nodiscard]] QString activeSymbol() const;
     [[nodiscard]] Timeframe activeTimeframe() const;
     [[nodiscard]] QString activeTimeframeLabel() const;
+    [[nodiscard]] IndicatorKind activeIndicator() const;
     void setStatus(
         const QString& source,
         std::size_t barCount,
@@ -60,8 +68,15 @@ private:
     QListWidget* watchlist_{};
     QComboBox* timeframeSelector_{};
     QComboBox* styleSelector_{};
+    QComboBox* indicatorSelector_{};
     QLabel* sourceLabel_{};
+    QLabel* latestValueLabel_{};
+    QLabel* changeValueLabel_{};
+    QLabel* rangeValueLabel_{};
+    QLabel* averageVolumeValueLabel_{};
+    QLabel* indicatorValueLabel_{};
     QAction* darkThemeAction_{};
+    Bars currentBars_;
     bool onlineDataEnabled_{true};
     bool settingsEnabled_{true};
     bool restoringSettings_{};

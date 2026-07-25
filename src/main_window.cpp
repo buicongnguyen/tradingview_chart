@@ -14,9 +14,11 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QKeySequence>
 #include <QLabel>
 #include <QListWidget>
+#include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -27,6 +29,8 @@
 #include <QVBoxLayout>
 
 #include <array>
+#include <cmath>
+#include <exception>
 #include <utility>
 
 namespace tvchart {
@@ -49,6 +53,15 @@ constexpr auto kApplication = "TradingViewChart";
         return QStringLiteral("1D");
     }
     return QStringLiteral("1m");
+}
+
+[[nodiscard]] QString formatPrice(const double value) {
+    const auto decimals = std::abs(value) < 1.0 ? 4 : 2;
+    return QLocale::system().toString(value, 'f', decimals);
+}
+
+[[nodiscard]] QString formatVolume(const double value) {
+    return QLocale::system().toString(std::max(0.0, value), 'f', 0);
 }
 
 } // namespace
@@ -155,6 +168,39 @@ void MainWindow::buildUi() {
     });
 
     toolbar->addSeparator();
+    toolbar->addWidget(new QLabel(tr("Indicator"), toolbar));
+    indicatorSelector_ = new QComboBox(toolbar);
+    indicatorSelector_->setObjectName(QStringLiteral("indicatorSelector"));
+    indicatorSelector_->addItem(
+        tr("None"),
+        static_cast<int>(IndicatorKind::None));
+    indicatorSelector_->addItem(
+        tr("SMA (20)"),
+        static_cast<int>(IndicatorKind::SimpleMovingAverage));
+    indicatorSelector_->addItem(
+        tr("EMA (20)"),
+        static_cast<int>(IndicatorKind::ExponentialMovingAverage));
+    indicatorSelector_->addItem(
+        tr("VWAP (UTC session)"),
+        static_cast<int>(IndicatorKind::VolumeWeightedAveragePrice));
+    indicatorSelector_->addItem(
+        tr("RSI (14)"),
+        static_cast<int>(IndicatorKind::RelativeStrengthIndex));
+    indicatorSelector_->addItem(
+        tr("MACD (12, 26, 9)"),
+        static_cast<int>(
+            IndicatorKind::MovingAverageConvergenceDivergence));
+    indicatorSelector_->setCurrentIndex(1);
+    toolbar->addWidget(indicatorSelector_);
+    connect(
+        indicatorSelector_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int) {
+            updateTechnicalAnalysis();
+        });
+
+    toolbar->addSeparator();
     sourceLabel_ = new QLabel(tr("Loading…"), toolbar);
     sourceLabel_->setObjectName(QStringLiteral("sourceLabel"));
     toolbar->addWidget(sourceLabel_);
@@ -179,6 +225,29 @@ void MainWindow::buildUi() {
             reloadActiveSource();
         }
     });
+
+    auto* analysisDock = new QDockWidget(tr("Calculated information"), this);
+    analysisDock->setObjectName(QStringLiteral("analysisDock"));
+    analysisDock->setAllowedAreas(
+        Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+    auto* analysisPanel = new QWidget(analysisDock);
+    analysisPanel->setObjectName(QStringLiteral("analysisPanel"));
+    auto* analysisLayout = new QFormLayout(analysisPanel);
+    analysisLayout->setContentsMargins(10, 10, 10, 10);
+    analysisLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    latestValueLabel_ = new QLabel(QStringLiteral("—"), analysisPanel);
+    changeValueLabel_ = new QLabel(QStringLiteral("—"), analysisPanel);
+    rangeValueLabel_ = new QLabel(QStringLiteral("—"), analysisPanel);
+    averageVolumeValueLabel_ = new QLabel(QStringLiteral("—"), analysisPanel);
+    indicatorValueLabel_ = new QLabel(QStringLiteral("—"), analysisPanel);
+    indicatorValueLabel_->setWordWrap(true);
+    analysisLayout->addRow(tr("Latest close"), latestValueLabel_);
+    analysisLayout->addRow(tr("Last-bar change"), changeValueLabel_);
+    analysisLayout->addRow(tr("Loaded range"), rangeValueLabel_);
+    analysisLayout->addRow(tr("Average volume (20)"), averageVolumeValueLabel_);
+    analysisLayout->addRow(tr("Technical calculation"), indicatorValueLabel_);
+    analysisDock->setWidget(analysisPanel);
+    addDockWidget(Qt::RightDockWidgetArea, analysisDock);
 
     statusBar()->showMessage(tr("Starting local chart renderer…"));
 }
@@ -214,6 +283,16 @@ void MainWindow::restoreSettings() {
         styleSelector_->setCurrentIndex(styleIndex);
     }
 
+    const auto indicatorValue =
+        settings.value(
+                    QStringLiteral("chart/indicator"),
+                    static_cast<int>(IndicatorKind::SimpleMovingAverage))
+            .toInt();
+    const auto indicatorIndex = indicatorSelector_->findData(indicatorValue);
+    if (indicatorIndex >= 0) {
+        indicatorSelector_->setCurrentIndex(indicatorIndex);
+    }
+
     const auto dark = settings.value(QStringLiteral("chart/darkTheme"), true).toBool();
     darkThemeAction_->setChecked(dark);
     applyTheme(dark);
@@ -229,6 +308,9 @@ void MainWindow::saveSettings() const {
         QStringLiteral("chart/timeframe"),
         timeframeSelector_->currentData().toInt());
     settings.setValue(QStringLiteral("chart/style"), styleSelector_->currentData().toString());
+    settings.setValue(
+        QStringLiteral("chart/indicator"),
+        indicatorSelector_->currentData().toInt());
     settings.setValue(QStringLiteral("chart/darkTheme"), darkThemeAction_->isChecked());
 }
 
@@ -268,7 +350,7 @@ void MainWindow::loadMarketData() {
 
             if (result.ok()) {
                 const auto barCount = result.bars.size();
-                if (chartView_->bridge()->setSeries(
+                if (applySeries(
                         symbol,
                         timeframeText,
                         result.source,
@@ -305,7 +387,7 @@ void MainWindow::showDemo(
     auto bars = DemoDataSource::generate(
         symbol.toStdString(), timeframe, 600, now);
     const auto barCount = bars.size();
-    if (chartView_->bridge()->setSeries(
+    if (applySeries(
             symbol,
             activeTimeframeLabel(),
             source,
@@ -318,6 +400,120 @@ void MainWindow::showDemo(
                     .arg(symbol, activeTimeframeLabel(), detail),
                 20'000);
         }
+    }
+}
+
+bool MainWindow::applySeries(
+    const QString& symbol,
+    const QString& timeframe,
+    const QString& source,
+    Bars bars) {
+    if (!chartView_->bridge()->setSeries(
+            symbol,
+            timeframe,
+            source,
+            bars)) {
+        return false;
+    }
+    currentBars_ = std::move(bars);
+    updateTechnicalAnalysis();
+    return true;
+}
+
+void MainWindow::updateTechnicalAnalysis() {
+    if (!chartView_ || !indicatorSelector_ || currentBars_.empty()) {
+        return;
+    }
+
+    try {
+        const auto statistics = calculateMarketStatistics(currentBars_);
+        latestValueLabel_->setText(formatPrice(statistics.latestClose));
+        const auto changePrefix =
+            statistics.barChange > 0.0 ? QStringLiteral("+") : QString{};
+        changeValueLabel_->setText(
+            tr("%1%2 (%3%4%)")
+                .arg(changePrefix)
+                .arg(formatPrice(statistics.barChange))
+                .arg(
+                    statistics.barChangePercent > 0.0
+                        ? QStringLiteral("+")
+                        : QString{})
+                .arg(
+                    QLocale::system().toString(
+                        statistics.barChangePercent,
+                        'f',
+                        2)));
+        changeValueLabel_->setStyleSheet(
+            statistics.barChange > 0.0
+                ? QStringLiteral("color: #26a69a;")
+                : statistics.barChange < 0.0
+                    ? QStringLiteral("color: #ef5350;")
+                    : QString{});
+        rangeValueLabel_->setText(
+            tr("%1 – %2 · close at %3%")
+                .arg(formatPrice(statistics.loadedLow))
+                .arg(formatPrice(statistics.loadedHigh))
+                .arg(
+                    QLocale::system().toString(
+                        statistics.loadedRangePositionPercent,
+                        'f',
+                        1)));
+        averageVolumeValueLabel_->setText(
+            formatVolume(statistics.averageVolume20));
+    } catch (const std::exception& error) {
+        latestValueLabel_->setText(tr("Unavailable"));
+        changeValueLabel_->setText(tr("Unavailable"));
+        changeValueLabel_->setStyleSheet({});
+        rangeValueLabel_->setText(tr("Unavailable"));
+        averageVolumeValueLabel_->setText(tr("Unavailable"));
+        indicatorValueLabel_->setToolTip(QString::fromUtf8(error.what()));
+    }
+
+    try {
+        auto calculation =
+            calculateIndicator(currentBars_, activeIndicator());
+        chartView_->bridge()->setIndicator(calculation);
+        const auto label = QString::fromLatin1(
+            indicatorLabel(calculation.kind).data(),
+            static_cast<qsizetype>(
+                indicatorLabel(calculation.kind).size()));
+        if (calculation.kind == IndicatorKind::None) {
+            indicatorValueLabel_->setText(tr("None"));
+        } else if (calculation.primary.empty()) {
+            indicatorValueLabel_->setText(tr("%1 · warming up").arg(label));
+        } else if (
+            calculation.kind ==
+            IndicatorKind::MovingAverageConvergenceDivergence) {
+            const auto macd = calculation.primary.back().value;
+            if (calculation.secondary.empty() ||
+                calculation.histogram.empty()) {
+                indicatorValueLabel_->setText(
+                    tr("%1\nMACD %2 · signal warming up")
+                        .arg(label)
+                        .arg(formatPrice(macd)));
+            } else {
+                indicatorValueLabel_->setText(
+                    tr("%1\nMACD %2 · signal %3 · histogram %4")
+                        .arg(label)
+                        .arg(formatPrice(macd))
+                        .arg(formatPrice(
+                            calculation.secondary.back().value))
+                        .arg(formatPrice(
+                            calculation.histogram.back().value)));
+            }
+        } else {
+            indicatorValueLabel_->setText(
+                tr("%1 · %2")
+                    .arg(label)
+                    .arg(formatPrice(calculation.primary.back().value)));
+        }
+        indicatorValueLabel_->setToolTip(
+            tr("Calculated locally from the loaded OHLCV bars. "
+               "This is not a forecast or trading recommendation."));
+    } catch (const std::exception& error) {
+        chartView_->bridge()->setIndicator({});
+        indicatorValueLabel_->setText(tr("Calculation unavailable"));
+        indicatorValueLabel_->setToolTip(QString::fromUtf8(error.what()));
     }
 }
 
@@ -357,7 +553,7 @@ void MainWindow::openCsv() {
     settings.setValue(QStringLiteral("files/lastDirectory"), QFileInfo(path).absolutePath());
     const auto symbol = QFileInfo(path).completeBaseName().toUpper();
     const auto barCount = result.bars.size();
-    if (chartView_->bridge()->setSeries(
+    if (applySeries(
             symbol, tr("CSV"), tr("Local CSV"), result.bars)) {
         setStatus(
             tr("Local CSV: %1").arg(QFileInfo(path).fileName()),
@@ -377,7 +573,9 @@ void MainWindow::applyTheme(const bool dark) {
             " background: #131722; color: #d1d4dc; }"
             "QListWidget::item:selected { background: #2962ff; color: white; }"
             "QToolBar { border-bottom: 1px solid #2a2e39; spacing: 7px; }"
-            "QDockWidget { border: 1px solid #2a2e39; }"));
+            "QDockWidget { border: 1px solid #2a2e39; }"
+            "QWidget#analysisPanel, QWidget#analysisPanel QLabel {"
+            " background: #131722; color: #d1d4dc; }"));
     } else {
         qApp->setStyleSheet({});
     }
@@ -397,6 +595,9 @@ void MainWindow::showAbout() {
            "<p>Yahoo Finance is queried first through an unofficial chart endpoint. "
            "Twelve Data is used as a fallback when TWELVE_DATA_API_KEY is set. "
            "Provider availability, terms, freshness, and display rights apply.</p>"
+           "<p>SMA, EMA, UTC-session VWAP, RSI, MACD, price change, range, and "
+           "average volume are calculated locally from the displayed OHLCV bars. "
+           "They are descriptive calculations, not forecasts or trading advice.</p>"
            "<p>Lightweight Charts is only the renderer. Offline demo data is synthetic; "
            "imported CSV data remains local.</p>"),
         &dialog);
@@ -423,6 +624,11 @@ Timeframe MainWindow::activeTimeframe() const {
 
 QString MainWindow::activeTimeframeLabel() const {
     return timeframeLabel(activeTimeframe());
+}
+
+IndicatorKind MainWindow::activeIndicator() const {
+    return static_cast<IndicatorKind>(
+        indicatorSelector_->currentData().toInt());
 }
 
 void MainWindow::setStatus(
