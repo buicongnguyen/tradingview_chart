@@ -1,25 +1,63 @@
 # TradingView Chart
 
-An offline-first C++20/Qt 6 desktop chart viewer powered by
+An online-capable C++20/Qt 6 desktop chart viewer powered by
 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts).
 
-The application does **not** require Alpaca, a broker account, API keys, or an
-application backend. It starts with deterministic demo data and can open local
-OHLCV CSV files. Lightweight Charts is the renderer; it does not include a
-market-data feed. Current or live quotes would still require a separately
-licensed provider adapter.
+The application does **not** require Alpaca, a broker account, or an application
+backend. It requests the active symbol from Yahoo Finance first. If that request
+fails and `TWELVE_DATA_API_KEY` is configured, it uses Twelve Data as a
+fallback. When neither provider is available, it displays deterministic offline
+demo data. Local OHLCV CSV import remains available.
+
+Lightweight Charts is only the renderer. Provider availability, freshness,
+rate limits, terms, and market-data display rights still apply.
 
 ## MVP features
 
 - Qt Widgets desktop shell with an embedded, local Qt WebEngine chart.
 - Candlestick, line, and area display modes.
 - Volume overlay, crosshair, pan, zoom, fit-to-data, and light/dark themes.
+- Yahoo Finance chart data as the default online source.
+- Optional Twelve Data REST fallback configured through an environment variable.
 - Deterministic offline demo data for a small watchlist and five timeframes.
 - Local CSV import with validation and clear error messages.
 - Settings persistence for window geometry, chart mode, theme, symbol, and
   timeframe.
-- No runtime CDN, broker, API key, or network dependency.
+- No runtime CDN, broker connection, or application backend.
 - C++ unit tests plus a Qt WebEngine startup smoke mode.
+
+## Market-data providers
+
+### Yahoo Finance
+
+Yahoo Finance is the default because its chart endpoint does not require a key.
+The endpoint is unofficial and unsupported, so it can be rate-limited, changed,
+or withdrawn without notice. The application labels Yahoo data explicitly and
+falls back safely when a request fails.
+
+### Twelve Data fallback
+
+Create a Twelve Data key and set it before starting the application:
+
+```powershell
+$env:TWELVE_DATA_API_KEY = 'your-key'
+.\dist\TradingViewChart-0.1.0-win64\tradingview_chart.exe
+```
+
+The key is read from the process environment and is never written to settings,
+logs, source files, or Git. Only the active symbol is polled. Intraday charts
+refresh every two minutes to stay within the free plan's daily request limit;
+daily charts refresh every fifteen minutes.
+
+The free plan may restrict display or redistribution. Review the current
+[Twelve Data pricing and usage terms](https://twelvedata.com/pricing) before
+using its data outside personal evaluation.
+
+### Offline behavior
+
+Choose **File → Load offline demo** to avoid network requests. CSV data remains
+local. If both online providers fail, the application shows an offline fallback
+and retries later.
 
 ## Data boundary
 
@@ -28,13 +66,10 @@ Lightweight Charts accepts application-supplied arrays through methods such as
 data rights. This repository deliberately separates:
 
 1. `Bar` domain values and validation;
-2. offline sources (`DemoDataSource` and `CsvBarLoader`);
-3. the Qt/WebChannel bridge; and
-4. the JavaScript chart renderer.
-
-Future HTTP/WebSocket providers can implement a provider interface without
-changing the renderer. They remain optional and must document credentials,
-rate limits, redistribution, and display rights.
+2. online acquisition and provider-specific JSON parsing;
+3. offline sources (`DemoDataSource` and `CsvBarLoader`);
+4. the Qt/WebChannel bridge; and
+5. the JavaScript chart renderer.
 
 ## Prerequisites
 
@@ -63,8 +98,13 @@ ctest --test-dir build -C Release --output-on-failure
 Run:
 
 ```powershell
+$env:PATH = "$qtRoot\bin;$env:PATH"
 .\build\Release\tradingview_chart.exe
 ```
+
+The raw build EXE requires Qt on `PATH`. For a self-contained application, use
+the deployable folder/ZIP created by `package-windows.ps1`; do not copy the EXE
+by itself.
 
 WebEngine smoke check:
 
@@ -94,8 +134,8 @@ its open and close.
 
 ## Refreshing Lightweight Charts
 
-The release bundle is pinned in `package.json` and committed under
-`assets/web/vendor` so the application stays offline at runtime.
+The chart-rendering bundle is pinned in `package.json` and committed under
+`assets/web/vendor`, so no CDN is required at runtime.
 
 ```powershell
 npm ci

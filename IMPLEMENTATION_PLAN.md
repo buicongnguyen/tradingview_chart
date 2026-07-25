@@ -1,6 +1,7 @@
 # Detailed implementation plan
 
-Status: reviewed and approved for execution on 2026-07-24.
+Status: original offline MVP completed on 2026-07-24; reviewed online-provider
+extension implemented on 2026-07-25.
 
 ## 1. Goal and non-goals
 
@@ -8,16 +9,20 @@ Build a Windows desktop chart workstation in C++20 and Qt with the interaction
 quality of the `TradeViewer_alt` desktop chart, replacing its custom QPainter
 renderer with the open-source TradingView Lightweight Charts library.
 
-The first release is offline-first:
+The application preserves offline operation while using direct market-data
+providers when a network is available:
 
 - it opens without credentials or network access;
+- it requests Yahoo Finance chart data by default;
+- it can fall back to Twelve Data when an environment-provided key is present;
 - it provides deterministic demo data;
 - it imports local OHLCV CSV files; and
 - it has no Alpaca code or broker coupling.
 
-Non-goals for the MVP are real-money trading, scraping TradingView, unofficial
-TradingView data endpoints, live exchange data, mobile packaging, screeners,
-alerts, backtesting, and paper order execution.
+Non-goals are real-money trading, scraping TradingView, unofficial TradingView
+data endpoints, mobile packaging, screeners, alerts, backtesting, and paper
+order execution. Yahoo's chart endpoint is explicitly labeled as unofficial
+and is never presented as a TradingView data service.
 
 ## 2. Reviewed findings
 
@@ -54,6 +59,9 @@ library in `QWebEngineView`, package all web assets locally, and use
 ```text
 Qt MainWindow
   ├── Watchlist / timeframe / style / theme controls
+  ├── MarketDataClient
+  │     ├── Yahoo Finance (primary)
+  │     └── Twelve Data (optional fallback)
   ├── DemoDataSource ─┐
   ├── CsvBarLoader ───┼── std::vector<Bar>
   └── ChartView
@@ -70,6 +78,10 @@ Qt MainWindow
 - `DemoDataSource`: deterministic seeded random walk for offline development.
 - `CsvBarLoader`: case-insensitive header mapping, quoted CSV fields, Unix or
   ISO time parsing, line-specific diagnostics, and final series validation.
+- `MarketDataParser`: provider-specific JSON conversion into validated `Bar`
+  values without coupling provider schemas to the renderer.
+- `MarketDataClient`: asynchronous HTTPS requests, cancellation, request
+  timeouts, Yahoo-first fallback sequencing, and environment-only credentials.
 
 ### Qt bridge and presentation
 
@@ -143,14 +155,26 @@ Qt SDKs, and generated packages out of version control.
 Gate: remote default branch contains the source, pinned dependency metadata,
 vendored runtime bundle, notices, plan, and passing local verification.
 
+### Phase 6 — direct market data
+
+Deliver Yahoo Finance as the no-key default, optional Twelve Data fallback via
+`TWELVE_DATA_API_KEY`, provider response parsers, active-symbol refresh,
+cancellation, visible source labels, offline fallback, and a non-CI live
+diagnostic mode.
+
+Gate: provider parser fixtures pass, `--market-data-smoke-test` retrieves and
+validates AAPL from Yahoo, normal WebEngine smoke remains network-independent,
+and provider failure leaves the application usable with demo data.
+
 ## 5. Follow-on roadmap
 
 After the MVP is stable:
 
 1. Add SQLite history/workspace persistence.
-2. Introduce `IMarketDataSource` with cancellation and error categories.
-3. Add a documented provider only after deciding data source, asset classes,
-   delay, licensing, redistribution, authentication, and retention rules.
+2. Generalize the implemented `MarketDataClient` behind `IMarketDataSource`
+   when a third provider or streaming transport is added.
+3. Reassess provider licensing, redistribution, authentication, and retention
+   rules before public or commercial distribution.
 4. Add incremental `update()` streaming, gap detection, reconnect, and bounded
    memory.
 5. Add indicators as separate series/panes (SMA, EMA, VWAP, RSI, MACD).
@@ -170,13 +194,17 @@ After the MVP is stable:
   `attributionLogo` on, and review notices during dependency upgrades.
 - **CSV ambiguity:** require named columns, UTC-normalize timestamps, reject
   ambiguous invalid rows rather than silently guessing.
-- **Provider scope creep:** keep the MVP offline and make network providers
-  optional modules with independent tests and rights review.
+- **Unofficial Yahoo dependency:** label it accurately, enforce timeouts, keep
+  Twelve Data and offline fallbacks, and avoid depending on it for startup.
+- **Provider scope creep:** keep acquisition outside the renderer, poll only
+  the active symbol, isolate parser tests, and require a rights review before
+  distribution.
 
 ## 7. Definition of done
 
-The MVP is done when a new clone can bootstrap Qt, configure and build, pass
-unit tests, complete the WebEngine smoke test, load its offline watchlist,
-import a valid CSV, reject an invalid CSV with a useful message, switch
+The extended application is done when a new clone can bootstrap Qt, configure
+and build, pass unit tests, complete the network-independent WebEngine smoke
+test, retrieve the active symbol from Yahoo, use Twelve Data when configured,
+fall back offline, import and validate CSV data, switch
 timeframe/style/theme, show TradingView attribution, package on Windows, and run
-without Alpaca credentials or a network connection.
+without Alpaca credentials or an application-owned backend.

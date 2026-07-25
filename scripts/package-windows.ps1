@@ -77,6 +77,34 @@ try {
     $env:VCINSTALLDIR = $originalVcInstallDirectory
 }
 
+$requiredRuntimeFiles = @(
+    'Qt6WebChannel.dll',
+    'Qt6WebEngineCore.dll',
+    'Qt6WebEngineWidgets.dll',
+    'QtWebEngineProcess.exe',
+    'platforms\qwindows.dll',
+    'resources\icudtl.dat'
+)
+foreach ($relativePath in $requiredRuntimeFiles) {
+    if (-not (Test-Path -LiteralPath (Join-Path $stage $relativePath))) {
+        throw "The deployed package is missing $relativePath."
+    }
+}
+
+$originalSmokePath = $env:PATH
+$originalChromiumFlags = $env:QTWEBENGINE_CHROMIUM_FLAGS
+try {
+    $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+    $env:QTWEBENGINE_CHROMIUM_FLAGS = '--disable-gpu --no-sandbox'
+    & (Join-Path $stage 'tradingview_chart.exe') --smoke-test
+    if ($LASTEXITCODE -ne 0) {
+        throw "The deployed application smoke test failed with exit code $LASTEXITCODE."
+    }
+} finally {
+    $env:PATH = $originalSmokePath
+    $env:QTWEBENGINE_CHROMIUM_FLAGS = $originalChromiumFlags
+}
+
 Compress-Archive -LiteralPath $stage -DestinationPath $archive -CompressionLevel Optimal
 $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -LiteralPath "$archive.sha256" -Value "$hash  $(Split-Path $archive -Leaf)" -Encoding ascii

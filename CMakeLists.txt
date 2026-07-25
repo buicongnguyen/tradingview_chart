@@ -14,6 +14,7 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 6.8 REQUIRED COMPONENTS
     Core
     Gui
+    Network
     Widgets
     WebChannel
     WebEngineCore
@@ -33,6 +34,8 @@ add_library(tradingview_chart_core
     src/data/csv_bar_loader.hpp
     src/data/demo_data_source.cpp
     src/data/demo_data_source.hpp
+    src/data/market_data_parser.cpp
+    src/data/market_data_parser.hpp
 )
 target_include_directories(tradingview_chart_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(tradingview_chart_core PUBLIC Qt6::Core)
@@ -52,12 +55,15 @@ qt_add_executable(tradingview_chart WIN32
     src/chart/chart_bridge.hpp
     src/chart/chart_view.cpp
     src/chart/chart_view.hpp
+    src/data/market_data_client.cpp
+    src/data/market_data_client.hpp
     resources.qrc
 )
 target_link_libraries(tradingview_chart PRIVATE
     tradingview_chart_core
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Widgets
     Qt6::WebChannel
     Qt6::WebEngineCore

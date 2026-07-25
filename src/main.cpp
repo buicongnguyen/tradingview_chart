@@ -1,3 +1,4 @@
+#include "data/market_data_client.hpp"
 #include "main_window.hpp"
 
 #include <QApplication>
@@ -13,17 +14,48 @@ int main(int argc, char* argv[]) {
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
-        QStringLiteral("Offline-first Qt chart viewer using TradingView Lightweight Charts"));
+        QStringLiteral("Qt market-data viewer using TradingView Lightweight Charts"));
     parser.addHelpOption();
     parser.addVersionOption();
     const QCommandLineOption smokeOption(
         QStringLiteral("smoke-test"),
         QStringLiteral("Exit successfully after the embedded chart reports ready."));
     parser.addOption(smokeOption);
+    const QCommandLineOption marketDataSmokeOption(
+        QStringLiteral("market-data-smoke-test"),
+        QStringLiteral("Fetch AAPL from the default Yahoo Finance provider and exit."));
+    parser.addOption(marketDataSmokeOption);
     parser.process(application);
 
-    tvchart::MainWindow window;
-    if (parser.isSet(smokeOption)) {
+    if (parser.isSet(marketDataSmokeOption)) {
+        tvchart::MarketDataClient client;
+        QTimer timeout;
+        timeout.setSingleShot(true);
+        QObject::connect(&timeout, &QTimer::timeout, &application, [&application]() {
+            qCritical() << "MARKET_DATA_SMOKE_TIMEOUT";
+            application.exit(2);
+        });
+        client.fetch(
+            QStringLiteral("AAPL"),
+            tvchart::Timeframe::FiveMinutes,
+            [&application, &timeout](tvchart::MarketDataResult result) {
+                timeout.stop();
+                if (!result.ok() || result.source != QStringLiteral("Yahoo Finance")) {
+                    qCritical() << "MARKET_DATA_SMOKE_FAILED" << result.error;
+                    application.exit(3);
+                    return;
+                }
+                qInfo() << "MARKET_DATA_SMOKE_OK" << result.source
+                        << result.bars.size();
+                application.exit(0);
+            });
+        timeout.start(20'000);
+        return application.exec();
+    }
+
+    const auto smokeMode = parser.isSet(smokeOption);
+    tvchart::MainWindow window(nullptr, !smokeMode);
+    if (smokeMode) {
         QTimer timeout;
         timeout.setSingleShot(true);
         QObject::connect(&timeout, &QTimer::timeout, &application, [&application]() {

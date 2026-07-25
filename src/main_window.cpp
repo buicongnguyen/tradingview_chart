@@ -2,6 +2,7 @@
 
 #include "data/csv_bar_loader.hpp"
 #include "data/demo_data_source.hpp"
+#include "data/market_data_client.hpp"
 
 #include <QAction>
 #include <QApplication>
@@ -22,6 +23,7 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QToolBar>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <array>
@@ -51,18 +53,23 @@ constexpr auto kApplication = "TradingViewChart";
 
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent)
-    : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent, const bool onlineDataEnabled)
+    : QMainWindow(parent),
+      onlineDataEnabled_(onlineDataEnabled) {
     buildUi();
     restoreSettings();
-    loadDemo();
+    reloadActiveSource();
 }
 
 void MainWindow::buildUi() {
-    setWindowTitle(tr("TradingView Chart — Offline"));
+    setWindowTitle(tr("TradingView Chart"));
     resize(1280, 800);
 
     chartView_ = new ChartView(this);
+    marketDataClient_ = new MarketDataClient(this);
+    refreshTimer_ = new QTimer(this);
+    refreshTimer_->setSingleShot(true);
+    connect(refreshTimer_, &QTimer::timeout, this, &MainWindow::loadMarketData);
     setCentralWidget(chartView_);
     connect(chartView_, &ChartView::chartReady, this, &MainWindow::chartReady);
     connect(chartView_, &ChartView::chartError, this, [this](const QString& message) {
@@ -73,6 +80,11 @@ void MainWindow::buildUi() {
     auto* openAction = fileMenu->addAction(tr("&Open OHLCV CSV…"));
     openAction->setShortcut(QKeySequence::Open);
     connect(openAction, &QAction::triggered, this, &MainWindow::openCsv);
+
+    auto* refreshAction = fileMenu->addAction(tr("&Refresh market data"));
+    refreshAction->setShortcut(QKeySequence::Refresh);
+    refreshAction->setEnabled(onlineDataEnabled_);
+    connect(refreshAction, &QAction::triggered, this, &MainWindow::loadMarketData);
 
     auto* demoAction = fileMenu->addAction(tr("Load &offline demo"));
     demoAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+D")));
@@ -97,6 +109,7 @@ void MainWindow::buildUi() {
     toolbar->setObjectName(QStringLiteral("chartToolbar"));
     toolbar->setMovable(false);
     toolbar->addAction(openAction);
+    toolbar->addAction(refreshAction);
     toolbar->addAction(demoAction);
     toolbar->addSeparator();
 
@@ -120,7 +133,7 @@ void MainWindow::buildUi() {
         this,
         [this](int) {
             if (!restoringSettings_) {
-                loadDemo();
+                reloadActiveSource();
             }
         });
 
@@ -136,11 +149,11 @@ void MainWindow::buildUi() {
     });
 
     toolbar->addSeparator();
-    sourceLabel_ = new QLabel(tr("Offline"), toolbar);
+    sourceLabel_ = new QLabel(tr("Loading…"), toolbar);
     sourceLabel_->setObjectName(QStringLiteral("sourceLabel"));
     toolbar->addWidget(sourceLabel_);
 
-    auto* watchlistDock = new QDockWidget(tr("Offline watchlist"), this);
+    auto* watchlistDock = new QDockWidget(tr("Watchlist"), this);
     watchlistDock->setObjectName(QStringLiteral("watchlistDock"));
     watchlistDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     watchlist_ = new QListWidget(watchlistDock);
@@ -157,7 +170,7 @@ void MainWindow::buildUi() {
     addDockWidget(Qt::LeftDockWidgetArea, watchlistDock);
     connect(watchlist_, &QListWidget::currentRowChanged, this, [this](int) {
         if (!restoringSettings_) {
-            loadDemo();
+            reloadActiveSource();
         }
     });
 
@@ -213,7 +226,66 @@ void MainWindow::saveSettings() const {
     settings.setValue(QStringLiteral("chart/darkTheme"), darkThemeAction_->isChecked());
 }
 
+void MainWindow::reloadActiveSource() {
+    if (onlineDataEnabled_) {
+        loadMarketData();
+    } else {
+        loadDemo();
+    }
+}
+
+void MainWindow::loadMarketData() {
+    if (!onlineDataEnabled_ || !watchlist_ || !timeframeSelector_ ||
+        watchlist_->currentItem() == nullptr) {
+        return;
+    }
+
+    refreshTimer_->stop();
+    const auto symbol = activeSymbol();
+    const auto timeframe = activeTimeframe();
+    const auto timeframeText = activeTimeframeLabel();
+    sourceLabel_->setText(tr("Loading Yahoo…"));
+    sourceLabel_->setToolTip(
+        marketDataClient_->hasTwelveDataKey()
+            ? tr("Yahoo Finance is primary; Twelve Data is the configured fallback.")
+            : tr("Yahoo Finance is primary. Set TWELVE_DATA_API_KEY to enable fallback."));
+    statusBar()->showMessage(tr("%1 · %2 · requesting market data…").arg(
+        symbol, timeframeText));
+
+    marketDataClient_->fetch(
+        symbol,
+        timeframe,
+        [this, symbol, timeframe, timeframeText](MarketDataResult result) mutable {
+            if (symbol != activeSymbol() || timeframe != activeTimeframe()) {
+                return;
+            }
+
+            if (result.ok()) {
+                const auto barCount = result.bars.size();
+                if (chartView_->bridge()->setSeries(
+                        symbol, timeframeText, std::move(result.bars))) {
+                    setStatus(result.source, barCount, symbol, timeframeText);
+                    sourceLabel_->setToolTip(
+                        result.source == QStringLiteral("Yahoo Finance")
+                            ? tr("Unofficial Yahoo Finance chart endpoint.")
+                            : tr("Twelve Data fallback response."));
+                }
+            } else {
+                showDemo(tr("Offline fallback"), result.error);
+            }
+            scheduleRefresh(timeframe);
+        });
+}
+
 void MainWindow::loadDemo() {
+    marketDataClient_->cancel();
+    refreshTimer_->stop();
+    showDemo(tr("Offline demo"), {});
+}
+
+void MainWindow::showDemo(
+    const QString& source,
+    const QString& detail) {
     if (!watchlist_ || !timeframeSelector_ || watchlist_->currentItem() == nullptr) {
         return;
     }
@@ -226,8 +298,24 @@ void MainWindow::loadDemo() {
     const auto barCount = bars.size();
     if (chartView_->bridge()->setSeries(
             symbol, activeTimeframeLabel(), std::move(bars))) {
-        setStatus(tr("Offline demo"), barCount);
+        setStatus(source, barCount, symbol, activeTimeframeLabel());
+        sourceLabel_->setToolTip(detail);
+        if (!detail.isEmpty()) {
+            statusBar()->showMessage(
+                tr("%1 · %2 · offline fallback: %3")
+                    .arg(symbol, activeTimeframeLabel(), detail),
+                20'000);
+        }
     }
+}
+
+void MainWindow::scheduleRefresh(const Timeframe timeframe) {
+    if (!onlineDataEnabled_) {
+        return;
+    }
+    const auto interval =
+        timeframe == Timeframe::OneDay ? 15 * 60 * 1'000 : 2 * 60 * 1'000;
+    refreshTimer_->start(interval);
 }
 
 void MainWindow::openCsv() {
@@ -243,6 +331,8 @@ void MainWindow::openCsv() {
         return;
     }
 
+    marketDataClient_->cancel();
+    refreshTimer_->stop();
     const auto result = CsvBarLoader::loadFile(path);
     if (!result.ok()) {
         QMessageBox::critical(
@@ -257,7 +347,12 @@ void MainWindow::openCsv() {
     const auto barCount = result.bars.size();
     if (chartView_->bridge()->setSeries(
             symbol, tr("CSV"), result.bars)) {
-        setStatus(tr("Local CSV: %1").arg(QFileInfo(path).fileName()), barCount);
+        setStatus(
+            tr("Local CSV: %1").arg(QFileInfo(path).fileName()),
+            barCount,
+            symbol,
+            tr("CSV"));
+        sourceLabel_->setToolTip(path);
     }
 }
 
@@ -283,12 +378,15 @@ void MainWindow::showAbout() {
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
         tr("<h2>TradingView Chart 0.1.0</h2>"
-           "<p>An offline-first C++/Qt chart viewer.</p>"
+           "<p>A C++/Qt market chart viewer with online and offline sources.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "
            "Lightweight Charts™</a> 5.2.0 under the Apache-2.0 license.</p>"
-           "<p>Lightweight Charts is a renderer and does not provide market data. "
-           "Demo data is synthetic; imported data remains local.</p>"),
+           "<p>Yahoo Finance is queried first through an unofficial chart endpoint. "
+           "Twelve Data is used as a fallback when TWELVE_DATA_API_KEY is set. "
+           "Provider availability, terms, freshness, and display rights apply.</p>"
+           "<p>Lightweight Charts is only the renderer. Offline demo data is synthetic; "
+           "imported CSV data remains local.</p>"),
         &dialog);
     label->setWordWrap(true);
     label->setOpenExternalLinks(true);
@@ -315,11 +413,15 @@ QString MainWindow::activeTimeframeLabel() const {
     return timeframeLabel(activeTimeframe());
 }
 
-void MainWindow::setStatus(const QString& source, const std::size_t barCount) {
+void MainWindow::setStatus(
+    const QString& source,
+    const std::size_t barCount,
+    const QString& symbol,
+    const QString& timeframe) {
     sourceLabel_->setText(source);
     statusBar()->showMessage(
         tr("%1 · %2 · %3 bars")
-            .arg(activeSymbol(), activeTimeframeLabel())
+            .arg(symbol, timeframe)
             .arg(static_cast<qulonglong>(barCount)));
 }
 

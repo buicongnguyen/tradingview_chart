@@ -1,5 +1,6 @@
 #include "data/csv_bar_loader.hpp"
 #include "data/demo_data_source.hpp"
+#include "data/market_data_parser.hpp"
 #include "domain/bar.hpp"
 
 #include <QTest>
@@ -13,6 +14,9 @@ private slots:
     void rejectsInvalidOhlc();
     void rejectsDuplicateTimestamp();
     void demoDataIsDeterministicAndValid();
+    void parsesYahooChartResponse();
+    void parsesTwelveDataResponseInAscendingOrder();
+    void reportsProviderErrors();
 };
 
 void CsvBarLoaderTests::parsesUnixAndIsoTimestamps() {
@@ -65,6 +69,74 @@ void CsvBarLoaderTests::demoDataIsDeterministicAndValid() {
     QCOMPARE(first.size(), std::size_t{500});
     const auto error = tvchart::validateBars(first);
     QVERIFY2(!error.has_value(), error ? error->c_str() : "");
+}
+
+void CsvBarLoaderTests::parsesYahooChartResponse() {
+    const auto result = tvchart::MarketDataParser::parseYahoo(R"json(
+        {
+          "chart": {
+            "result": [{
+              "timestamp": [1700000000, 1700000300, 1700000600],
+              "indicators": {
+                "quote": [{
+                  "open": [100.0, null, 102.0],
+                  "high": [104.0, null, 106.0],
+                  "low": [99.0, null, 101.0],
+                  "close": [102.0, null, 105.0],
+                  "volume": [1000, null, 1400]
+                }]
+              }
+            }],
+            "error": null
+          }
+        }
+    )json");
+
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.bars.size(), std::size_t{2});
+    QCOMPARE(result.bars.front().timestamp, std::int64_t{1'700'000'000});
+    QCOMPARE(result.bars.back().close, 105.0);
+}
+
+void CsvBarLoaderTests::parsesTwelveDataResponseInAscendingOrder() {
+    const auto result = tvchart::MarketDataParser::parseTwelveData(R"json(
+        {
+          "meta": {"symbol": "AAPL", "interval": "5min"},
+          "values": [
+            {
+              "datetime": "2026-07-24 09:35:00",
+              "open": "102.0", "high": "106.0", "low": "101.0",
+              "close": "105.0", "volume": "1400"
+            },
+            {
+              "datetime": "2026-07-24 09:30:00",
+              "open": "100.0", "high": "104.0", "low": "99.0",
+              "close": "102.0", "volume": "1000"
+            }
+          ],
+          "status": "ok"
+        }
+    )json");
+
+    QVERIFY2(result.ok(), qPrintable(result.error));
+    QCOMPARE(result.bars.size(), std::size_t{2});
+    QVERIFY(result.bars.front().timestamp < result.bars.back().timestamp);
+    QCOMPARE(result.bars.front().open, 100.0);
+    QCOMPARE(result.bars.back().close, 105.0);
+}
+
+void CsvBarLoaderTests::reportsProviderErrors() {
+    const auto yahoo = tvchart::MarketDataParser::parseYahoo(R"json(
+        {"chart":{"result":null,"error":{"code":"Not Found","description":"No data"}}}
+    )json");
+    QVERIFY(!yahoo.ok());
+    QVERIFY(yahoo.error.contains(QStringLiteral("No data")));
+
+    const auto twelve = tvchart::MarketDataParser::parseTwelveData(R"json(
+        {"code":401,"message":"invalid api key","status":"error"}
+    )json");
+    QVERIFY(!twelve.ok());
+    QVERIFY(twelve.error.contains(QStringLiteral("invalid api key")));
 }
 
 QTEST_APPLESS_MAIN(CsvBarLoaderTests)
