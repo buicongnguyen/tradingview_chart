@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   build-test:
-    runs-on: windows-latest
+    # Qt's msvc2022 package requires the Visual Studio 2022 runner image.
+    runs-on: windows-2022
     timeout-minutes: 45
 
     steps:
