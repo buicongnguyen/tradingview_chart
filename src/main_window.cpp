@@ -53,11 +53,17 @@ constexpr auto kApplication = "TradingViewChart";
 
 } // namespace
 
-MainWindow::MainWindow(QWidget* parent, const bool onlineDataEnabled)
+MainWindow::MainWindow(
+    QWidget* parent,
+    const bool onlineDataEnabled,
+    const bool settingsEnabled)
     : QMainWindow(parent),
-      onlineDataEnabled_(onlineDataEnabled) {
+      onlineDataEnabled_(onlineDataEnabled),
+      settingsEnabled_(settingsEnabled) {
     buildUi();
-    restoreSettings();
+    if (settingsEnabled_) {
+        restoreSettings();
+    }
     reloadActiveSource();
 }
 
@@ -263,7 +269,10 @@ void MainWindow::loadMarketData() {
             if (result.ok()) {
                 const auto barCount = result.bars.size();
                 if (chartView_->bridge()->setSeries(
-                        symbol, timeframeText, std::move(result.bars))) {
+                        symbol,
+                        timeframeText,
+                        result.source,
+                        std::move(result.bars))) {
                     setStatus(result.source, barCount, symbol, timeframeText);
                     sourceLabel_->setToolTip(
                         result.source == QStringLiteral("Yahoo Finance")
@@ -297,7 +306,10 @@ void MainWindow::showDemo(
         symbol.toStdString(), timeframe, 600, now);
     const auto barCount = bars.size();
     if (chartView_->bridge()->setSeries(
-            symbol, activeTimeframeLabel(), std::move(bars))) {
+            symbol,
+            activeTimeframeLabel(),
+            source,
+            std::move(bars))) {
         setStatus(source, barCount, symbol, activeTimeframeLabel());
         sourceLabel_->setToolTip(detail);
         if (!detail.isEmpty()) {
@@ -346,7 +358,7 @@ void MainWindow::openCsv() {
     const auto symbol = QFileInfo(path).completeBaseName().toUpper();
     const auto barCount = result.bars.size();
     if (chartView_->bridge()->setSeries(
-            symbol, tr("CSV"), result.bars)) {
+            symbol, tr("CSV"), tr("Local CSV"), result.bars)) {
         setStatus(
             tr("Local CSV: %1").arg(QFileInfo(path).fileName()),
             barCount,
@@ -426,7 +438,9 @@ void MainWindow::setStatus(
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    saveSettings();
+    if (settingsEnabled_) {
+        saveSettings();
+    }
     QMainWindow::closeEvent(event);
 }
 

@@ -5,13 +5,17 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QTimeZone>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <optional>
 
 namespace tvchart {
 namespace {
+
+constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
 
 [[nodiscard]] std::optional<double> finiteNumber(const QJsonValue& value) {
     bool ok = false;
@@ -28,6 +32,16 @@ namespace {
     return number;
 }
 
+[[nodiscard]] std::optional<std::int64_t> unixTimestamp(const QJsonValue& value) {
+    const auto number = finiteNumber(value);
+    if (!number || *number < 1.0 ||
+        *number > static_cast<double>(kMaximumUnixTimestamp) ||
+        std::trunc(*number) != *number) {
+        return std::nullopt;
+    }
+    return static_cast<std::int64_t>(*number);
+}
+
 [[nodiscard]] MarketDataParseResult jsonError(
     const QJsonParseError& parseError,
     const QString& provider) {
@@ -38,7 +52,12 @@ namespace {
 }
 
 [[nodiscard]] MarketDataParseResult finish(Bars bars, const QString& provider) {
-    std::ranges::sort(bars, {}, &Bar::timestamp);
+    std::stable_sort(
+        bars.begin(),
+        bars.end(),
+        [](const Bar& left, const Bar& right) {
+            return left.timestamp < right.timestamp;
+        });
     const auto duplicate =
         std::ranges::unique(bars, {}, &Bar::timestamp);
     bars.erase(duplicate.begin(), duplicate.end());
@@ -63,8 +82,8 @@ namespace {
     const QJsonArray& closes,
     const QJsonArray& volumes,
     const qsizetype index) {
-    const auto timestampValue = timestamps.at(index);
-    if (!timestampValue.isDouble()) {
+    const auto timestamp = unixTimestamp(timestamps.at(index));
+    if (!timestamp) {
         return std::nullopt;
     }
     const auto open = finiteNumber(opens.at(index));
@@ -85,7 +104,7 @@ namespace {
     }
 
     Bar bar{
-        .timestamp = static_cast<std::int64_t>(timestampValue.toDouble()),
+        .timestamp = *timestamp,
         .open = *open,
         .high = *high,
         .low = *low,
@@ -98,17 +117,26 @@ namespace {
     return bar;
 }
 
-[[nodiscard]] std::optional<std::int64_t> twelveTimestamp(const QString& text) {
+[[nodiscard]] std::optional<std::int64_t> twelveTimestamp(
+    const QString& text,
+    const QTimeZone& defaultTimeZone) {
     auto isoText = text.trimmed();
     isoText.replace(u' ', u'T');
-    if (!isoText.endsWith(u'Z')) {
-        isoText.append(u'Z');
+    auto dateTime = QDateTime::fromString(isoText, Qt::ISODateWithMs);
+    if (!dateTime.isValid()) {
+        dateTime = QDateTime::fromString(isoText, Qt::ISODate);
     }
-    const auto timestamp = QDateTime::fromString(isoText, Qt::ISODate);
-    if (!timestamp.isValid()) {
+    if (!dateTime.isValid()) {
         return std::nullopt;
     }
-    return timestamp.toSecsSinceEpoch();
+    if (dateTime.timeSpec() == Qt::LocalTime) {
+        dateTime = QDateTime(dateTime.date(), dateTime.time(), defaultTimeZone);
+    }
+    const auto timestamp = dateTime.toSecsSinceEpoch();
+    if (timestamp <= 0 || timestamp > kMaximumUnixTimestamp) {
+        return std::nullopt;
+    }
+    return timestamp;
 }
 
 } // namespace
@@ -116,8 +144,14 @@ namespace {
 MarketDataParseResult MarketDataParser::parseYahoo(const QByteArray& payload) {
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(payload, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+    if (parseError.error != QJsonParseError::NoError) {
         return jsonError(parseError, QStringLiteral("Yahoo Finance"));
+    }
+    if (!document.isObject()) {
+        return {
+            .error = QStringLiteral(
+                "Yahoo Finance returned an unexpected top-level JSON value."),
+        };
     }
 
     const auto chart = document.object().value(QStringLiteral("chart")).toObject();
@@ -169,8 +203,14 @@ MarketDataParseResult MarketDataParser::parseYahoo(const QByteArray& payload) {
 MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payload) {
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(payload, &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+    if (parseError.error != QJsonParseError::NoError) {
         return jsonError(parseError, QStringLiteral("Twelve Data"));
+    }
+    if (!document.isObject()) {
+        return {
+            .error = QStringLiteral(
+                "Twelve Data returned an unexpected top-level JSON value."),
+        };
     }
 
     const auto root = document.object();
@@ -182,13 +222,32 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
         };
     }
 
+    auto timeZone = QTimeZone::utc();
+    const auto timeZoneId =
+        root.value(QStringLiteral("meta"))
+            .toObject()
+            .value(QStringLiteral("timezone"))
+            .toString()
+            .trimmed();
+    if (!timeZoneId.isEmpty()) {
+        timeZone = QTimeZone(timeZoneId.toUtf8());
+        if (!timeZone.isValid()) {
+            return {
+                .error = QStringLiteral("Twelve Data returned an unsupported timezone: %1")
+                             .arg(timeZoneId),
+            };
+        }
+    }
+
     const auto values = root.value(QStringLiteral("values")).toArray();
     Bars bars;
     bars.reserve(static_cast<std::size_t>(values.size()));
     for (const auto& value : values) {
         const auto object = value.toObject();
         const auto timestamp =
-            twelveTimestamp(object.value(QStringLiteral("datetime")).toString());
+            twelveTimestamp(
+                object.value(QStringLiteral("datetime")).toString(),
+                timeZone);
         const auto open = finiteNumber(object.value(QStringLiteral("open")));
         const auto high = finiteNumber(object.value(QStringLiteral("high")));
         const auto low = finiteNumber(object.value(QStringLiteral("low")));

@@ -7,7 +7,11 @@ namespace tvchart {
 ChartBridge::ChartBridge(QObject* parent)
     : QObject(parent) {}
 
-bool ChartBridge::setSeries(QString symbol, QString timeframe, Bars bars) {
+bool ChartBridge::setSeries(
+    QString symbol,
+    QString timeframe,
+    QString source,
+    Bars bars) {
     if (const auto error = validateBars(bars)) {
         emit errorReported(QString::fromStdString(*error));
         return false;
@@ -15,9 +19,10 @@ bool ChartBridge::setSeries(QString symbol, QString timeframe, Bars bars) {
 
     symbol_ = std::move(symbol);
     timeframe_ = std::move(timeframe);
+    source_ = std::move(source);
     bars_ = std::move(bars);
     if (ready_) {
-        emit seriesChanged(symbol_, timeframe_, toJson(bars_));
+        emit seriesChanged(symbol_, timeframe_, source_, toJson(bars_));
     }
     return true;
 }
@@ -53,12 +58,12 @@ bool ChartBridge::isReady() const noexcept {
 }
 
 void ChartBridge::webReady() {
-    if (ready_) {
-        return;
-    }
+    const auto firstReady = !ready_;
     ready_ = true;
     publishState();
-    emit ready();
+    if (firstReady) {
+        emit ready();
+    }
 }
 
 void ChartBridge::reportError(const QString& message) {
@@ -69,7 +74,7 @@ void ChartBridge::publishState() {
     emit themeChanged(dark_);
     emit chartStyleChanged(style_);
     if (!bars_.empty()) {
-        emit seriesChanged(symbol_, timeframe_, toJson(bars_));
+        emit seriesChanged(symbol_, timeframe_, source_, toJson(bars_));
     }
 }
 

@@ -119,6 +119,11 @@ Create a tested, deployable Windows ZIP:
 pwsh -NoProfile -File .\scripts\package-windows.ps1
 ```
 
+The Windows GitHub Actions workflow runs this same packaging path and uploads
+the tested ZIP plus its SHA-256 file as workflow artifacts. This verifies the
+deployed Qt WebChannel, WebEngine, networking, platform, and TLS runtime files,
+not only the raw build output.
+
 ## CSV format
 
 The first row must contain these case-insensitive column names:

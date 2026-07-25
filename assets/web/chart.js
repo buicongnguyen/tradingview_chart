@@ -5,6 +5,7 @@
   const loading = document.getElementById("loading");
   const symbolLabel = document.getElementById("symbol");
   const timeframeLabel = document.getElementById("timeframe");
+  const sourceLabel = document.getElementById("source");
 
   let bridge = null;
   let dark = true;
@@ -160,7 +161,11 @@
   }
 
   function setTheme(value) {
-    dark = Boolean(value);
+    const nextDark = Boolean(value);
+    if (nextDark === dark && priceSeries !== null) {
+      return;
+    }
+    dark = nextDark;
     const palette = colors();
     document.body.classList.toggle("dark", dark);
     document.body.classList.toggle("light", !dark);
@@ -188,16 +193,33 @@
     if (!["candlestick", "line", "area"].includes(nextStyle)) {
       throw new Error(`Unsupported chart style: ${nextStyle}`);
     }
+    if (nextStyle === style && priceSeries !== null) {
+      return;
+    }
     style = nextStyle;
     createPriceSeries();
   }
 
-  function setBars(symbol, timeframe, values) {
-    bars = Array.from(values, normalizeBar);
+  function setBars(symbol, timeframe, source, values) {
+    const nextBars = Array.from(values, normalizeBar);
+    const rangesOverlap =
+      bars.length > 0 &&
+      nextBars.length > 0 &&
+      nextBars.at(-1).time >= bars[0].time &&
+      nextBars[0].time <= bars.at(-1).time;
+    const shouldFit =
+      bars.length === 0 ||
+      symbolLabel.textContent !== String(symbol) ||
+      timeframeLabel.textContent !== String(timeframe) ||
+      !rangesOverlap;
+    bars = nextBars;
     symbolLabel.textContent = String(symbol);
     timeframeLabel.textContent = String(timeframe);
+    sourceLabel.textContent = String(source);
     setSeriesData();
-    chart.timeScale().fitContent();
+    if (shouldFit) {
+      chart.timeScale().fitContent();
+    }
     loading.hidden = true;
   }
 
@@ -221,9 +243,9 @@
     }
     new QWebChannel(window.qt.webChannelTransport, (channel) => {
       bridge = channel.objects.chartBridge;
-      bridge.seriesChanged.connect((symbol, timeframe, values) => {
+      bridge.seriesChanged.connect((symbol, timeframe, source, values) => {
         try {
-          setBars(symbol, timeframe, values);
+          setBars(symbol, timeframe, source, values);
         } catch (error) {
           reportError(error);
         }

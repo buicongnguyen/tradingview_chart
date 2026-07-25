@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
     }
 
     const auto smokeMode = parser.isSet(smokeOption);
-    tvchart::MainWindow window(nullptr, !smokeMode);
+    tvchart::MainWindow window(nullptr, !smokeMode, !smokeMode);
     if (smokeMode) {
         QTimer timeout;
         timeout.setSingleShot(true);

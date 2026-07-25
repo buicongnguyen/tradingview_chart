@@ -28,6 +28,8 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/vendor/lightweight-charts.
 endif()
 
 add_library(tradingview_chart_core
+    src/chart/chart_bridge.cpp
+    src/chart/chart_bridge.hpp
     src/domain/bar.cpp
     src/domain/bar.hpp
     src/data/csv_bar_loader.cpp
@@ -51,8 +53,6 @@ qt_add_executable(tradingview_chart WIN32
     src/main.cpp
     src/main_window.cpp
     src/main_window.hpp
-    src/chart/chart_bridge.cpp
-    src/chart/chart_bridge.hpp
     src/chart/chart_view.cpp
     src/chart/chart_view.hpp
     src/data/market_data_client.cpp

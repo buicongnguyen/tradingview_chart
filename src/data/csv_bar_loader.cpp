@@ -4,12 +4,15 @@
 #include <QFile>
 #include <QHash>
 #include <QStringList>
+#include <QTimeZone>
 
 #include <cmath>
 #include <optional>
 
 namespace tvchart {
 namespace {
+
+constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
 
 struct CsvLineResult {
     QStringList fields;
@@ -52,7 +55,7 @@ struct CsvLineResult {
         if (integerValue > 100'000'000'000LL) {
             integerValue /= 1'000;
         }
-        if (integerValue > 0) {
+        if (integerValue > 0 && integerValue <= kMaximumUnixTimestamp) {
             return integerValue;
         }
         return std::nullopt;
@@ -65,7 +68,14 @@ struct CsvLineResult {
     if (!dateTime.isValid()) {
         return std::nullopt;
     }
-    return dateTime.toUTC().toSecsSinceEpoch();
+    if (dateTime.timeSpec() == Qt::LocalTime) {
+        dateTime = QDateTime(dateTime.date(), dateTime.time(), QTimeZone::utc());
+    }
+    const auto timestamp = dateTime.toSecsSinceEpoch();
+    if (timestamp <= 0 || timestamp > kMaximumUnixTimestamp) {
+        return std::nullopt;
+    }
+    return timestamp;
 }
 
 [[nodiscard]] std::optional<double> parseNumber(const QString& text) {
@@ -96,7 +106,9 @@ CsvLoadResult CsvBarLoader::loadFile(const QString& path) {
 }
 
 CsvLoadResult CsvBarLoader::parse(const QStringView content) {
-    const auto normalized = content.toString().replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    auto normalized =
+        content.toString().replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(u'\r', u'\n');
     const auto lines = normalized.split(u'\n');
     if (lines.isEmpty() || lines.front().trimmed().isEmpty()) {
         return {.error = QStringLiteral("The CSV file is empty.")};
@@ -114,6 +126,11 @@ CsvLoadResult CsvBarLoader::parse(const QStringView content) {
             name.removeFirst();
         }
         if (!name.isEmpty()) {
+            if (columns.contains(name)) {
+                return {
+                    .error = QStringLiteral("Duplicate column in CSV header: %1").arg(name),
+                };
+            }
             columns.insert(name, index);
         }
     }

@@ -22,7 +22,10 @@ class MainWindow final : public QMainWindow {
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget* parent = nullptr, bool onlineDataEnabled = true);
+    explicit MainWindow(
+        QWidget* parent = nullptr,
+        bool onlineDataEnabled = true,
+        bool settingsEnabled = true);
 
 signals:
     void chartReady();
@@ -60,6 +63,7 @@ private:
     QLabel* sourceLabel_{};
     QAction* darkThemeAction_{};
     bool onlineDataEnabled_{true};
+    bool settingsEnabled_{true};
     bool restoringSettings_{};
 };
 

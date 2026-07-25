@@ -21,12 +21,33 @@ $archive = "$stage.zip"
     -QtRoot $QtRoot `
     -BuildDirectory $buildDirectory
 
-$visualStudioRoot = 'C:\Program Files\Microsoft Visual Studio\2022\Community'
-$cmake = Join-Path $visualStudioRoot 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
-if (-not (Test-Path -LiteralPath $cmake)) {
-    $cmake = (Get-Command cmake -ErrorAction Stop).Source
+$cmakeCommand = Get-Command cmake -ErrorAction SilentlyContinue
+$cmake = if ($null -ne $cmakeCommand) { $cmakeCommand.Source } else { '' }
+$visualStudioRoot = ''
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+if (Test-Path -LiteralPath $vswhere) {
+    $visualStudioRoot = (& $vswhere `
+        -latest `
+        -products '*' `
+        -version '[17.0,18.0)' `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+        -property installationPath | Select-Object -First 1)
+}
+if ([string]::IsNullOrWhiteSpace($cmake) -and
+    -not [string]::IsNullOrWhiteSpace($visualStudioRoot)) {
+    $candidate = Join-Path $visualStudioRoot 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+    if (Test-Path -LiteralPath $candidate) {
+        $cmake = $candidate
+    }
+}
+if ([string]::IsNullOrWhiteSpace($cmake) -or -not (Test-Path -LiteralPath $cmake)) {
+    throw 'CMake was not found in PATH or a Visual Studio 2022 C++ installation.'
 }
 $ctest = Join-Path (Split-Path $cmake -Parent) 'ctest.exe'
+if (-not (Test-Path -LiteralPath $ctest)) {
+    $ctestCommand = Get-Command ctest -ErrorAction Stop
+    $ctest = $ctestCommand.Source
+}
 
 & $cmake --build $buildDirectory --config $Configuration
 if ($LASTEXITCODE -ne 0) {
@@ -63,7 +84,9 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'assets\web\vendor\NOTICE.ligh
 
 $originalVcInstallDirectory = $env:VCINSTALLDIR
 try {
-    $env:VCINSTALLDIR = "$(Join-Path $visualStudioRoot 'VC')\"
+    if (-not [string]::IsNullOrWhiteSpace($visualStudioRoot)) {
+        $env:VCINSTALLDIR = "$(Join-Path $visualStudioRoot 'VC')\"
+    }
     & (Join-Path $qtBin 'windeployqt.exe') `
         --release `
         --no-translations `
@@ -81,8 +104,10 @@ $requiredRuntimeFiles = @(
     'Qt6WebChannel.dll',
     'Qt6WebEngineCore.dll',
     'Qt6WebEngineWidgets.dll',
+    'Qt6Network.dll',
     'QtWebEngineProcess.exe',
     'platforms\qwindows.dll',
+    'tls\qschannelbackend.dll',
     'resources\icudtl.dat'
 )
 foreach ($relativePath in $requiredRuntimeFiles) {

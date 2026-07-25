@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <random>
 #include <string>
 
 namespace tvchart {
@@ -22,6 +21,37 @@ namespace {
     return std::round(value * 100.0) / 100.0;
 }
 
+[[nodiscard]] std::uint64_t mix(std::uint64_t value) noexcept {
+    value += 0x9E3779B97F4A7C15ULL;
+    value = (value ^ (value >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27U)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31U);
+}
+
+[[nodiscard]] double unitValue(
+    const std::uint64_t seed,
+    const std::int64_t bucket,
+    const std::uint64_t stream) noexcept {
+    const auto bits =
+        mix(seed ^ static_cast<std::uint64_t>(bucket) ^ stream) >> 11U;
+    return static_cast<double>(bits) * (1.0 / 9'007'199'254'740'992.0);
+}
+
+[[nodiscard]] double priceAt(
+    const std::uint64_t seed,
+    const double base,
+    const std::int64_t bucket) {
+    const auto position = static_cast<double>(bucket);
+    const auto phase =
+        static_cast<double>(seed % 6'283ULL) / 1'000.0;
+    const auto cycle =
+        0.10 * std::sin(position * 0.017 + phase) +
+        0.04 * std::sin(position * 0.0037 + phase * 0.37);
+    const auto noise =
+        (unitValue(seed, bucket, 0xA0761D6478BD642FULL) - 0.5) * 0.018;
+    return std::max(0.01, base * (1.0 + cycle + noise));
+}
+
 } // namespace
 
 Bars DemoDataSource::generate(
@@ -35,14 +65,14 @@ Bars DemoDataSource::generate(
 
     const auto interval = timeframeSeconds(timeframe);
     const auto snappedEnd = endTimestamp - (endTimestamp % interval);
+    const auto maximumCount =
+        static_cast<std::uint64_t>(snappedEnd / interval);
+    if (snappedEnd <= 0 ||
+        static_cast<std::uint64_t>(count) > maximumCount) {
+        return {};
+    }
     const auto seed = fnv1a(symbol) ^ (static_cast<std::uint64_t>(timeframe) << 56U);
-    std::mt19937_64 generator(seed);
-    std::normal_distribution<double> returnDistribution(0.00015, 0.011);
-    std::uniform_real_distribution<double> wickDistribution(0.001, 0.008);
-    std::lognormal_distribution<double> volumeDistribution(13.2, 0.45);
-
     const auto base = 45.0 + static_cast<double>(seed % 26'000ULL) / 100.0;
-    auto previousClose = base;
 
     Bars bars;
     bars.reserve(count);
@@ -50,23 +80,30 @@ Bars DemoDataSource::generate(
         snappedEnd - static_cast<std::int64_t>(count - 1) * interval;
 
     for (std::size_t index = 0; index < count; ++index) {
-        const auto open = previousClose;
-        const auto drift = std::clamp(returnDistribution(generator), -0.08, 0.08);
-        const auto close = std::max(0.01, open * (1.0 + drift));
-        const auto upperWick = std::max(open, close) * wickDistribution(generator);
-        const auto lowerWick = std::min(open, close) * wickDistribution(generator);
-        const auto high = std::max(open, close) + upperWick;
-        const auto low = std::max(0.01, std::min(open, close) - lowerWick);
+        const auto timestamp =
+            firstTimestamp + static_cast<std::int64_t>(index) * interval;
+        const auto bucket = timestamp / interval;
+        const auto open = roundPrice(priceAt(seed, base, bucket - 1));
+        const auto close = roundPrice(priceAt(seed, base, bucket));
+        const auto upperWick =
+            std::max(open, close) *
+            (0.001 + 0.007 * unitValue(seed, bucket, 0xE7037ED1A0B428DBULL));
+        const auto lowerWick =
+            std::min(open, close) *
+            (0.001 + 0.007 * unitValue(seed, bucket, 0x8EBC6AF09C88C6E3ULL));
+        const auto volume =
+            250'000.0 +
+            1'750'000.0 * unitValue(seed, bucket, 0x589965CC75374CC3ULL);
 
         bars.push_back(Bar{
-            .timestamp = firstTimestamp + static_cast<std::int64_t>(index) * interval,
-            .open = roundPrice(open),
-            .high = roundPrice(high),
-            .low = roundPrice(low),
-            .close = roundPrice(close),
-            .volume = std::round(volumeDistribution(generator)),
+            .timestamp = timestamp,
+            .open = open,
+            .high = roundPrice(std::max(open, close) + upperWick),
+            .low = roundPrice(
+                std::max(0.01, std::min(open, close) - lowerWick)),
+            .close = close,
+            .volume = std::round(volume),
         });
-        previousClose = bars.back().close;
     }
 
     return bars;

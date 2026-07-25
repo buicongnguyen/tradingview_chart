@@ -14,9 +14,13 @@ test("embedded page has no runtime CDN dependency", async () => {
 
 test("renderer keeps attribution and receives application data", async () => {
   const source = await readFile(chartUrl, "utf8");
+  assert.doesNotThrow(() => new Function(source));
   assert.match(source, /attributionLogo:\s*true/);
   assert.match(source, /priceSeries\.setData/);
   assert.match(source, /bridge\.seriesChanged\.connect/);
+  assert.match(source, /sourceLabel\.textContent\s*=\s*String\(source\)/);
+  assert.match(source, /const rangesOverlap\s*=/);
+  assert.match(source, /if \(shouldFit\)/);
   assert.doesNotMatch(source, /\bfetch\s*\(/);
   assert.doesNotMatch(source, /XMLHttpRequest/);
 });

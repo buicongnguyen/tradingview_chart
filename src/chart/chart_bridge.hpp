@@ -14,7 +14,7 @@ class ChartBridge final : public QObject {
 public:
     explicit ChartBridge(QObject* parent = nullptr);
 
-    bool setSeries(QString symbol, QString timeframe, Bars bars);
+    bool setSeries(QString symbol, QString timeframe, QString source, Bars bars);
     void setDarkTheme(bool dark);
     void setChartStyle(QString style);
     void requestFit();
@@ -25,7 +25,11 @@ public:
     Q_INVOKABLE void reportError(const QString& message);
 
 signals:
-    void seriesChanged(const QString& symbol, const QString& timeframe, const QJsonArray& bars);
+    void seriesChanged(
+        const QString& symbol,
+        const QString& timeframe,
+        const QString& source,
+        const QJsonArray& bars);
     void themeChanged(bool dark);
     void chartStyleChanged(const QString& style);
     void fitRequested();
@@ -38,6 +42,7 @@ private:
 
     QString symbol_;
     QString timeframe_;
+    QString source_;
     QString style_{QStringLiteral("candlestick")};
     Bars bars_;
     bool dark_{true};
