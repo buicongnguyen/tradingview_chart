@@ -131,7 +131,7 @@ if ($null -eq $unsignedApk) {
 
 $distRoot = Join-Path $repositoryRoot 'dist'
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-$packageBase = "TradeChartLab-1.1.0-android-$androidAbi"
+$packageBase = "TradeChartLab-1.2.0-android-$androidAbi"
 $artifactSuffix = if ($Configuration -eq 'Debug') {
     '-debug'
 } elseif ($SkipSigning) {

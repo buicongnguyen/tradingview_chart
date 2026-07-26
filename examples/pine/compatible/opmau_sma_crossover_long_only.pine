@@ -1,0 +1,28 @@
+//@version=5
+// Adapted from opmau/TradingView at commit
+// aca6c98eff5c1f48aab8de6a9fcc6513f0415e40.
+// Copyright (c) 2024 opmau. MIT License; see ../licenses/opmau-MIT.txt.
+// Modified for TradeChart Lab: long-only, native fixed-cost configuration,
+// completed-bar decisions, and next-open fills.
+strategy("opmau SMA Crossover - Long Only",
+    overlay=true,
+    initial_capital=10000,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=100)
+
+fastLength = input.int(9, "Fast SMA Length")
+slowLength = input.int(21, "Slow SMA Length")
+
+fastSma = ta.sma(close, fastLength)
+slowSma = ta.sma(close, slowLength)
+
+enterLong = ta.crossover(fastSma, slowSma)
+exitLong = ta.crossunder(fastSma, slowSma)
+
+if enterLong
+    strategy.entry("Long", strategy.long)
+if exitLong
+    strategy.close("Long")
+
+plot(fastSma, "Fast SMA")
+plot(slowSma, "Slow SMA")

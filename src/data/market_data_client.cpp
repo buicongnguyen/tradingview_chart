@@ -103,7 +103,9 @@ struct YahooQuery {
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradeChartLab/1.1.0 (Qt 6; personal client)"));
+        QStringLiteral(
+            "TradeChartLab/" TRADINGVIEW_CHART_VERSION
+            " (Qt 6; personal client)"));
     request.setRawHeader("Accept", "application/json");
     request.setTransferTimeout(15'000);
     request.setAttribute(

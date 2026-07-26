@@ -148,7 +148,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradeChartLab-1.1.0-win64\tradingview_chart.exe
+.\dist\TradeChartLab-1.2.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -167,7 +167,7 @@ Set a key before starting the application, then use the **Research** dock's
 
 ```powershell
 $env:ALPHA_VANTAGE_API_KEY = 'your-key'
-.\dist\TradeChartLab-1.1.0-win64\tradingview_chart.exe
+.\dist\TradeChartLab-1.2.0-win64\tradingview_chart.exe
 ```
 
 The refresh retrieves the selected company's overview followed by its earnings
@@ -363,6 +363,14 @@ subset into native Strategy Lab rules. The supported subset includes:
   `and` or `or` group; and
 - long `strategy.entry` plus `strategy.close`, using `if` or `when`.
 
+The example selector includes three reviewed MIT-licensed adaptations: an
+opmau SMA crossover, an Eterna EMA ribbon, and an Eterna-derived RSI
+mean-reversion rule. Their pinned upstream originals, licenses, modification
+notes, and compatibility policy are under `examples/pine/`. The original
+scripts remain separate because they contain behavior the native engine must
+reject; only the explicitly marked long-only adaptations are bundled into the
+desktop application.
+
 The importer can map initial capital, percent-of-equity allocation, and fixed
 cash-per-order commission only when their meaning matches the native engine.
 It rejects short positions, history indexing, functions/loops, mutable state,
@@ -552,7 +560,7 @@ not only the raw build output.
 ## Android APK
 
 The release page provides
-`TradeChartLab-1.1.0-android-arm64-v8a.apk` for typical modern Android
+`TradeChartLab-1.2.0-android-arm64-v8a.apk` for typical modern Android
 phones. Download it on the phone, verify its SHA-256 against the adjacent
 `.sha256` file, allow installation from the browser or file manager when
 Android prompts, and open **TradeChart Lab**. Android may show a Play Protect
@@ -568,6 +576,10 @@ Requirements:
 The app starts by requesting AAPL from Yahoo. If the request fails, it displays
 deterministic demo data. A Twelve Data key can be entered under **Provider
 fallback** for the current process only; it is cleared when the app exits.
+Portrait mode exposes the compact symbol, timeframe, style, indicator, and
+provider controls. Landscape mode automatically hides that panel to preserve
+the chart area; rotate back to portrait to change settings. Market-structure
+overlays are opt-in on Android so their labels do not obscure a small chart.
 
 To build the APK locally, install Android Studio command-line tools/JDK 17+,
 then run:

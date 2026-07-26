@@ -638,7 +638,12 @@ void parseStrategyDeclaration(
             QStringLiteral("strategy() requires a title."));
         return;
     }
-    if (const auto title = unquoted(arguments.front());
+    const auto named = namedArguments(arguments);
+    const auto titleExpression =
+        named.contains(QStringLiteral("title"))
+            ? named.value(QStringLiteral("title"))
+            : arguments.front();
+    if (const auto title = unquoted(titleExpression);
         !title.isEmpty()) {
         context.title = title.left(120);
     } else {
@@ -647,10 +652,11 @@ void parseStrategyDeclaration(
             PineDiagnosticSeverity::Error,
             statement.line,
             QStringLiteral(
-                "The first strategy() argument must be a quoted title."));
+                "strategy() requires a quoted positional or named title."));
     }
-    const auto named = namedArguments(arguments);
     const QSet<QString> supportedProperties{
+        QStringLiteral("title"),
+        QStringLiteral("shorttitle"),
         QStringLiteral("initial_capital"),
         QStringLiteral("default_qty_type"),
         QStringLiteral("default_qty_value"),
@@ -1205,7 +1211,9 @@ PineStrategyImportResult importPineStrategy(
             versionSeen = true;
             break;
         }
-        if (!lines[index].trimmed().isEmpty()) {
+        const auto trimmed = lines[index].trimmed();
+        if (!trimmed.isEmpty() &&
+            !trimmed.startsWith(QStringLiteral("//"))) {
             break;
         }
     }
@@ -1215,7 +1223,7 @@ PineStrategyImportResult importPineStrategy(
             PineDiagnosticSeverity::Error,
             1,
             QStringLiteral(
-                "Start the script with //@version=5 or //@version=6."));
+                "Place //@version=5 or //@version=6 before the first code statement."));
     }
 
     const auto statements = logicalStatements(lines, context);

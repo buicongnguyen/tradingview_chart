@@ -13,6 +13,7 @@
 #include <QDateTimeEdit>
 #include <QDoubleSpinBox>
 #include <QFormLayout>
+#include <QFile>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -981,8 +982,28 @@ void StrategyLabWidget::buildUi() {
     scriptSource_->document()->setMaximumBlockCount(1'000);
     scriptLayout->addWidget(scriptSource_, 2);
     auto* scriptActions = new QHBoxLayout;
+    auto* scriptExampleSelector = new QComboBox(scriptTab_);
+    scriptExampleSelector->setObjectName(
+        QStringLiteral("scriptExampleSelector"));
+    scriptExampleSelector->addItem(
+        tr("Built-in · EMA 20/50"),
+        QString{});
+    scriptExampleSelector->addItem(
+        tr("MIT · opmau SMA 9/21 long-only"),
+        QStringLiteral(
+            ":/pine-examples/opmau_sma_crossover_long_only.pine"));
+    scriptExampleSelector->addItem(
+        tr("MIT · Eterna EMA ribbon long-only"),
+        QStringLiteral(
+            ":/pine-examples/eterna_ema_ribbon_long_only.pine"));
+    scriptExampleSelector->addItem(
+        tr("MIT · Eterna RSI mean reversion long-only"),
+        QStringLiteral(
+            ":/pine-examples/eterna_rsi_mean_reversion_long_only.pine"));
     auto* scriptExample =
-        new QPushButton(tr("Load safe example"), scriptTab_);
+        new QPushButton(tr("Load selected"), scriptTab_);
+    scriptExample->setObjectName(
+        QStringLiteral("scriptLoadExampleButton"));
     auto* scriptCompile =
         new QPushButton(tr("Compile"), scriptTab_);
     scriptCompile->setObjectName(
@@ -991,6 +1012,7 @@ void StrategyLabWidget::buildUi() {
         new QPushButton(tr("Apply native rules"), scriptTab_);
     scriptApply_->setObjectName(QStringLiteral("scriptApplyButton"));
     scriptApply_->setEnabled(false);
+    scriptActions->addWidget(scriptExampleSelector);
     scriptActions->addWidget(scriptExample);
     scriptActions->addWidget(scriptCompile);
     scriptActions->addWidget(scriptApply_);
@@ -1000,8 +1022,23 @@ void StrategyLabWidget::buildUi() {
         scriptExample,
         &QPushButton::clicked,
         this,
-        [this] {
-            scriptSource_->setPlainText(pineStrategyExample());
+        [this, scriptExampleSelector] {
+            const auto resourcePath =
+                scriptExampleSelector->currentData().toString();
+            auto source = pineStrategyExample();
+            if (!resourcePath.isEmpty()) {
+                QFile file(resourcePath);
+                if (!file.open(
+                        QIODevice::ReadOnly |
+                        QIODevice::Text)) {
+                    scriptApply_->setEnabled(false);
+                    scriptSummary_->setText(
+                        tr("Bundled example could not be opened."));
+                    return;
+                }
+                source = QString::fromUtf8(file.readAll());
+            }
+            scriptSource_->setPlainText(source);
             compileScript();
         });
     connect(
@@ -1025,7 +1062,7 @@ void StrategyLabWidget::buildUi() {
             emit workspaceChanged();
         });
     scriptSummary_ = new QLabel(
-        tr("Load the safe example or paste a supported strategy."),
+        tr("Load a reviewed bundled example or paste a supported strategy."),
         scriptTab_);
     scriptSummary_->setObjectName(QStringLiteral("scriptCompileSummary"));
     scriptSummary_->setWordWrap(true);

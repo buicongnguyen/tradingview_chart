@@ -1,7 +1,7 @@
 {
   "name": "tradechart-lab-assets",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Pinned web assets for the TradeChart Lab Qt application",
   "engines": {
     "node": ">=22.3"

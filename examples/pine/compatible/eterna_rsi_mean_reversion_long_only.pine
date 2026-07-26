@@ -1,0 +1,28 @@
+//@version=5
+// Adapted from the RSI component of
+// EternaHybridExchange/tradingview-strategies momentum_combo.pine at commit
+// 882564096838e7a449d4666dd9f8771891b293ae.
+// Copyright (c) 2026 Eterna Hybrid Exchange. MIT License; see
+// ../licenses/eterna-MIT.txt.
+// This is a simplified long-only adaptation, not the upstream multi-indicator
+// strategy. It removes shorts, MACD/Stochastic/Momentum, leverage, and alerts.
+strategy("Eterna RSI Mean Reversion - Long Only",
+    overlay=false,
+    initial_capital=10000,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=25)
+
+rsiLength = input.int(14, "RSI Length")
+oversoldLevel = input.float(30, "Oversold recovery")
+exitLevel = input.float(55, "Exit recovery")
+
+rsiValue = ta.rsi(close, rsiLength)
+enterLong = ta.crossover(rsiValue, oversoldLevel)
+exitLong = ta.crossover(rsiValue, exitLevel)
+
+if enterLong
+    strategy.entry("Long", strategy.long)
+if exitLong
+    strategy.close("Long")
+
+plot(rsiValue, "RSI")
