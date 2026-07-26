@@ -2,9 +2,11 @@
 
 #include "data/csv_bar_loader.hpp"
 #include "data/demo_data_source.hpp"
+#include "data/historical_data_store.hpp"
 #include "data/market_data_client.hpp"
 #include "research/alpha_vantage_research_client.hpp"
 #include "research/margin_risk.hpp"
+#include "strategy/strategy_lab_widget.hpp"
 
 #include <QAbstractItemView>
 #include <QAction>
@@ -15,6 +17,7 @@
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -40,6 +43,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -245,6 +249,8 @@ MainWindow::MainWindow(
     reloadActiveSource();
 }
 
+MainWindow::~MainWindow() = default;
+
 void MainWindow::buildUi() {
     setWindowTitle(tr("TradingView Chart"));
     resize(1500, 900);
@@ -252,6 +258,16 @@ void MainWindow::buildUi() {
     chartView_ = new ChartView(this);
     marketDataClient_ = new MarketDataClient(this);
     researchClient_ = new AlphaVantageResearchClient(this);
+    const auto historyPath =
+        settingsEnabled_
+            ? QDir(
+                  QStandardPaths::writableLocation(
+                      QStandardPaths::AppDataLocation))
+                  .filePath(QStringLiteral("history.sqlite"))
+            : QStringLiteral(":memory:");
+    historyStore_ =
+        std::make_unique<HistoricalDataStore>(historyPath);
+    const auto historyAvailable = historyStore_->open();
     refreshTimer_ = new QTimer(this);
     refreshTimer_->setSingleShot(true);
     connect(refreshTimer_, &QTimer::timeout, this, &MainWindow::loadMarketData);
@@ -404,7 +420,14 @@ void MainWindow::buildUi() {
     buildDataStatusDock();
     buildResearchDock();
     buildMarginRiskDock();
+    buildStrategyLabDock();
     statusBar()->showMessage(tr("Starting local chart renderer…"));
+    if (!historyAvailable) {
+        statusBar()->showMessage(
+            tr("Historical cache is unavailable: %1")
+                .arg(historyStore_->lastError()),
+            15'000);
+    }
 }
 
 void MainWindow::buildWatchlistDock() {
@@ -1019,6 +1042,46 @@ void MainWindow::buildMarginRiskDock() {
     }
 }
 
+void MainWindow::buildStrategyLabDock() {
+    auto* dock = new QDockWidget(tr("Strategy Lab"), this);
+    dock->setObjectName(QStringLiteral("strategyLabDock"));
+    dock->setAllowedAreas(
+        Qt::BottomDockWidgetArea |
+        Qt::LeftDockWidgetArea |
+        Qt::RightDockWidgetArea);
+    strategyLab_ = new StrategyLabWidget(historyStore_.get(), dock);
+    strategyLab_->setObjectName(QStringLiteral("strategyLabWidget"));
+    dock->setWidget(strategyLab_);
+    addDockWidget(Qt::BottomDockWidgetArea, dock);
+
+    connect(
+        strategyLab_,
+        &StrategyLabWidget::replayBarsRequested,
+        this,
+        &MainWindow::showReplaySeries);
+    connect(
+        strategyLab_,
+        &StrategyLabWidget::restoreFullSeriesRequested,
+        this,
+        &MainWindow::restoreFullSeries);
+    connect(
+        strategyLab_,
+        &StrategyLabWidget::statusMessage,
+        this,
+        [this](const QString& message) {
+            statusBar()->showMessage(message, 12'000);
+        });
+    connect(
+        dock,
+        &QDockWidget::visibilityChanged,
+        this,
+        [this](const bool visible) {
+            if (!visible && strategyLab_) {
+                strategyLab_->restoreChartIfReplaying();
+            }
+        });
+}
+
 void MainWindow::restoreSettings() {
     QSettings settings(
         QString::fromLatin1(kOrganization),
@@ -1105,6 +1168,9 @@ void MainWindow::restoreSettings() {
     chartView_->bridge()->setChartStyle(styleSelector_->currentData().toString());
     chartView_->bridge()->setPriceScaleMode(
         scaleSelector_->currentData().toString());
+    if (strategyLab_) {
+        strategyLab_->restoreSettings(settings);
+    }
 }
 
 void MainWindow::restoreIndicatorSettings(QSettings& settings) {
@@ -1238,6 +1304,9 @@ void MainWindow::saveSettings() const {
     settings.setValue(
         QStringLiteral("chart/indicators"),
         QJsonDocument(indicators).toJson(QJsonDocument::Compact));
+    if (strategyLab_) {
+        strategyLab_->saveSettings(settings);
+    }
 }
 
 void MainWindow::saveSettingsNow() const {
@@ -1375,9 +1444,58 @@ bool MainWindow::applySeries(
     currentBars_ = std::move(bars);
     updateTechnicalAnalysis();
     updateDataStatus(source, metadata, currentBars_, lifecycle, detail);
+    if (strategyLab_) {
+        strategyLab_->setCurrentSeries(
+            currentSeriesSymbol_,
+            activeTimeframe(),
+            source,
+            currentBars_,
+            metadata);
+    }
     refreshResearchDisplay();
     recalculateMarginRisk();
     return true;
+}
+
+void MainWindow::showReplaySeries(Bars bars) {
+    if (bars.empty() || currentBars_.empty()) {
+        return;
+    }
+    if (!chartView_->bridge()->setSeries(
+            currentSeriesSymbol_,
+            activeTimeframeLabel(),
+            tr("Replay · %1").arg(dataStatus_.source),
+            bars)) {
+        return;
+    }
+    try {
+        chartView_->bridge()->setIndicators(
+            calculateIndicators(bars, activeIndicatorSpecs()));
+    } catch (const std::exception& error) {
+        chartView_->bridge()->setIndicators({});
+        statusBar()->showMessage(
+            tr("Replay indicator calculation failed: %1")
+                .arg(QString::fromUtf8(error.what())),
+            8'000);
+    }
+    statusBar()->showMessage(
+        tr("Replay · %1 · %2 of %3 bars")
+            .arg(currentSeriesSymbol_)
+            .arg(bars.size())
+            .arg(currentBars_.size()));
+}
+
+void MainWindow::restoreFullSeries() {
+    if (currentBars_.empty()) {
+        return;
+    }
+    chartView_->bridge()->setSeries(
+        currentSeriesSymbol_,
+        activeTimeframeLabel(),
+        dataStatus_.source,
+        currentBars_);
+    updateTechnicalAnalysis();
+    statusBar()->showMessage(tr("Full series restored."), 5'000);
 }
 
 void MainWindow::updateTechnicalAnalysis() {
@@ -1642,6 +1760,7 @@ void MainWindow::refreshWatchlistEntries(const QString& preferredSymbol) {
     const auto* list = activeWatchlist();
     if (!list) {
         watchlistNoteInput_->clear();
+        refreshStrategyWatchlist();
         refreshResearchDisplay();
         recalculateMarginRisk();
         return;
@@ -1673,8 +1792,23 @@ void MainWindow::refreshWatchlistEntries(const QString& preferredSymbol) {
     const auto entryIndex = activeWatchlistEntryIndex();
     watchlistNoteInput_->setText(
         entryIndex ? list->entries[*entryIndex].note : QString{});
+    refreshStrategyWatchlist();
     refreshResearchDisplay();
     recalculateMarginRisk();
+}
+
+void MainWindow::refreshStrategyWatchlist() {
+    if (!strategyLab_) {
+        return;
+    }
+    QStringList symbols;
+    if (const auto* list = activeWatchlist()) {
+        symbols.reserve(static_cast<qsizetype>(list->entries.size()));
+        for (const auto& entry : list->entries) {
+            symbols.push_back(entry.symbol);
+        }
+    }
+    strategyLab_->setWatchlistSymbols(std::move(symbols));
 }
 
 void MainWindow::selectNamedWatchlist(const int index) {
@@ -2799,7 +2933,7 @@ void MainWindow::showAbout() {
     dialog.setMinimumWidth(560);
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
-        tr("<h2>TradingView Chart 0.4.0</h2>"
+        tr("<h2>TradingView Chart 0.5.0</h2>"
            "<p>A C++/Qt market chart viewer with online and offline sources.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "
@@ -2816,6 +2950,10 @@ void MainWindow::showAbout() {
            "<p>Earnings and corporate-event dates retain source and confidence. "
            "The margin panel is a long-only scenario calculator, not a broker "
            "connection or prediction of a margin-call date.</p>"
+           "<p>The local Strategy Lab reuses one rule definition for next-bar "
+           "long-only backtests, deterministic replay, cached-watchlist scans, "
+           "and foreground-only alerts. Provider history is stored locally "
+           "with its provenance; synthetic demo bars are not cached.</p>"
            "<p>The crosshair values and calculations are descriptive, not "
            "forecasts or trading advice. Offline demo data is synthetic; "
            "imported CSV data and watchlist notes remain local.</p>"),

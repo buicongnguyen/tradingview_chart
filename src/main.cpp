@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDebug>
 #include <QDoubleSpinBox>
+#include <QPushButton>
 #include <QTableWidget>
 #include <QTimer>
 
@@ -13,7 +14,7 @@ int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("buicongnguyen"));
     QCoreApplication::setApplicationName(QStringLiteral("TradingViewChart"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.4.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.5.0"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
@@ -89,12 +90,18 @@ int main(int argc, char* argv[]) {
                 QStringLiteral("researchEventTable"));
             auto* marginValue = window.findChild<QDoubleSpinBox*>(
                 QStringLiteral("marginLongValueInput"));
+            auto* strategyRun = window.findChild<QPushButton*>(
+                QStringLiteral("strategyRunBacktest"));
+            auto* strategyTrades = window.findChild<QTableWidget*>(
+                QStringLiteral("strategyTradesTable"));
             if (!indicatorTable || !scaleSelector || !targetTable ||
-                !eventTable || !marginValue) {
+                !eventTable || !marginValue || !strategyRun ||
+                !strategyTrades) {
                 qCritical() << "SMOKE_ANALYSIS_CONTROLS_MISSING";
                 application.exit(4);
                 return;
             }
+            strategyRun->click();
             indicatorTable->item(3, 0)->setCheckState(Qt::Checked);
             scaleSelector->setCurrentIndex(
                 scaleSelector->findData(QStringLiteral("logarithmic")));

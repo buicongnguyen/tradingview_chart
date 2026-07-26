@@ -1,5 +1,6 @@
 #include "research/alpha_vantage_research_client.hpp"
 
+#include "network/bounded_network_reply.hpp"
 #include "research/alpha_vantage_research_parser.hpp"
 #include "watchlists/watchlist_workspace.hpp"
 
@@ -23,7 +24,7 @@ constexpr qsizetype kMaximumResearchPayloadBytes = 5 * 1024 * 1024;
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradingViewChart/0.4.0 (Qt 6; personal client)"));
+        QStringLiteral("TradingViewChart/0.5.0 (Qt 6; personal client)"));
     request.setRawHeader("Accept", "application/json,text/csv");
     request.setTransferTimeout(15'000);
     request.setAttribute(
@@ -32,15 +33,19 @@ constexpr qsizetype kMaximumResearchPayloadBytes = 5 * 1024 * 1024;
     return request;
 }
 
-[[nodiscard]] QString replyError(QNetworkReply* reply) {
-    if (reply->error() != QNetworkReply::NoError) {
-        return QStringLiteral("Alpha Vantage request failed: %1")
-            .arg(reply->errorString());
+[[nodiscard]] QString responseError(
+    const BoundedNetworkReplyResult& response) {
+    if (response.limitExceeded) {
+        return QStringLiteral(
+            "Alpha Vantage response exceeded 5 MiB.");
     }
-    const auto status =
-        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status < 200 || status >= 300) {
-        return QStringLiteral("Alpha Vantage returned HTTP %1.").arg(status);
+    if (!response.transportError.isEmpty()) {
+        return QStringLiteral("Alpha Vantage request failed: %1")
+            .arg(response.transportError);
+    }
+    if (response.httpStatus < 200 || response.httpStatus >= 300) {
+        return QStringLiteral("Alpha Vantage returned HTTP %1.")
+            .arg(response.httpStatus);
     }
     return {};
 }
@@ -113,37 +118,29 @@ void AlphaVantageResearchClient::requestOverview(
         symbol,
         apiKey_)));
     activeReply_ = reply;
-    connect(
+    consumeBoundedNetworkReply(
         reply,
-        &QNetworkReply::finished,
+        kMaximumResearchPayloadBytes,
         this,
         [this,
          reply,
          symbol,
          requestGeneration,
-         callback = std::move(callback)]() mutable {
+         callback = std::move(callback)](
+            BoundedNetworkReplyResult response) mutable {
             if (requestGeneration != generation_) {
-                reply->deleteLater();
                 return;
             }
             if (activeReply_ == reply) {
                 activeReply_.clear();
             }
-            auto error = replyError(reply);
-            const auto payload = reply->readAll();
-            reply->deleteLater();
-            if (error.isEmpty() &&
-                payload.size() > kMaximumResearchPayloadBytes) {
-                error =
-                    QStringLiteral(
-                        "Alpha Vantage overview exceeded 5 MiB.");
-            }
+            auto error = responseError(response);
             if (!error.isEmpty()) {
                 callback({.error = std::move(error)});
                 return;
             }
             auto parsed = AlphaVantageResearchParser::parseOverview(
-                payload,
+                response.payload,
                 QDateTime::currentSecsSinceEpoch());
             if (!parsed.ok()) {
                 callback({.error = std::move(parsed.error)});
@@ -178,36 +175,28 @@ void AlphaVantageResearchClient::requestCalendar(
         symbol,
         apiKey_)));
     activeReply_ = reply;
-    connect(
+    consumeBoundedNetworkReply(
         reply,
-        &QNetworkReply::finished,
+        kMaximumResearchPayloadBytes,
         this,
         [this,
          reply,
          requestGeneration,
          snapshot = std::move(snapshot),
          events = std::move(events),
-         callback = std::move(callback)]() mutable {
+         callback = std::move(callback)](
+            BoundedNetworkReplyResult response) mutable {
             if (requestGeneration != generation_) {
-                reply->deleteLater();
                 return;
             }
             if (activeReply_ == reply) {
                 activeReply_.clear();
             }
-            auto warning = replyError(reply);
-            const auto payload = reply->readAll();
-            reply->deleteLater();
-            if (warning.isEmpty() &&
-                payload.size() > kMaximumResearchPayloadBytes) {
-                warning =
-                    QStringLiteral(
-                        "Alpha Vantage earnings calendar exceeded 5 MiB.");
-            }
+            auto warning = responseError(response);
             if (warning.isEmpty()) {
                 auto parsed =
                     AlphaVantageResearchParser::parseEarningsCalendar(
-                        payload,
+                        response.payload,
                         QDateTime::currentSecsSinceEpoch());
                 if (parsed.ok()) {
                     const auto expectedSymbol =

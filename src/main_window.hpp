@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <memory>
 #include <vector>
 
 class QAction;
@@ -31,7 +32,9 @@ class QTimer;
 namespace tvchart {
 
 class MarketDataClient;
+class HistoricalDataStore;
 class AlphaVantageResearchClient;
+class StrategyLabWidget;
 struct AlphaVantageResearchResult;
 
 class MainWindow final : public QMainWindow {
@@ -42,6 +45,7 @@ public:
         QWidget* parent = nullptr,
         bool onlineDataEnabled = true,
         bool settingsEnabled = true);
+    ~MainWindow() override;
 
 signals:
     void chartReady();
@@ -74,6 +78,7 @@ private:
     void buildDataStatusDock();
     void buildResearchDock();
     void buildMarginRiskDock();
+    void buildStrategyLabDock();
     void restoreSettings();
     void restoreIndicatorSettings(QSettings& settings);
     void saveSettings() const;
@@ -125,6 +130,9 @@ private:
     void addResearchEvent();
     void removeResearchEvent();
     void recalculateMarginRisk();
+    void showReplaySeries(Bars bars);
+    void restoreFullSeries();
+    void refreshStrategyWatchlist();
 
     void showLoadingDataStatus(const QString& symbol, const QString& timeframe);
     void updateDataStatus(
@@ -148,6 +156,8 @@ private:
     ChartView* chartView_{};
     MarketDataClient* marketDataClient_{};
     AlphaVantageResearchClient* researchClient_{};
+    StrategyLabWidget* strategyLab_{};
+    std::unique_ptr<HistoricalDataStore> historyStore_;
     QTimer* refreshTimer_{};
     QTimer* statusAgeTimer_{};
 

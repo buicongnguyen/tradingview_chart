@@ -12,7 +12,26 @@ demo data. Local OHLCV CSV import remains available.
 Lightweight Charts is only the renderer. Provider availability, freshness,
 rate limits, terms, and market-data display rights still apply.
 
-## Version 0.4 features
+## Version 0.5 features
+
+- A desktop **Strategy Lab** with an editable entry rule and exit rule. The
+  underlying model supports multiple conditions and is shared by every
+  strategy feature.
+- Long-only historical backtests that evaluate completed bars and execute at
+  the next bar open, with configurable allocation, fixed commissions,
+  slippage, fractional shares, trade reconciliation, maximum drawdown, win
+  rate, profit factor, and exposure.
+- Deterministic bar replay with start depth, step, play/pause, and speed
+  controls.
+- A cached-watchlist scanner and foreground alerts using the exact same rule
+  evaluator. Alerts run only while the desktop application is open.
+- A local SQLite historical cache for successfully validated polled data.
+  Overlapping downloads are transactionally upserted without deleting older
+  non-overlapping bars, and each series retains provider, market metadata,
+  retrieval time, and cache time. Synthetic demo data is never cached.
+- Bounded network/CSV reads, formula-safe spreadsheet exports, bounded research
+  targets, and Android packaging that cannot silently replace the established
+  signing identity or overwrite a signed APK with an unsigned build.
 
 - Native Qt Android application for Android 9 (API 28) and newer, distributed
   as a signed ARM64 APK.
@@ -88,7 +107,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.4.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.5.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -107,7 +126,7 @@ Set a key before starting the application, then use the **Research** dock's
 
 ```powershell
 $env:ALPHA_VANTAGE_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.4.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.5.0-win64\tradingview_chart.exe
 ```
 
 The refresh retrieves the selected company's overview followed by its earnings
@@ -129,6 +148,21 @@ Choose **File → Load offline demo** to avoid network requests. CSV data remain
 local. If both online providers fail, the application shows an offline fallback
 and retries later.
 
+### Local historical cache
+
+On desktop, each successful Yahoo or Twelve Data response is stored under the
+application data directory in `history.sqlite`. The cache is used by the
+Strategy Lab scanner; it is not a hidden data server and it does not make
+provider data redistributable. A symbol becomes scannable after that
+symbol/timeframe has been loaded at least once. The UI reports a symbol as
+**Unavailable** when compatible cached bars do not exist or an indicator has
+not completed warm-up.
+
+Cache rows retain the provider identity and provider-supplied metadata. The app
+does not merge bars from different providers into one series. Review each
+provider's retention and usage terms before relying on the cache outside
+personal evaluation.
+
 ## Technical calculations
 
 The indicator engine consumes the same validated bars shown on the chart. SMA,
@@ -140,6 +174,28 @@ and requires the slow period to be greater than the fast period.
 Warm-up values are omitted until the required number of bars exists. All
 calculations are descriptive views of historical input; they are not price
 forecasts, trading recommendations, or guarantees of future results.
+
+## Strategy Lab assumptions
+
+The desktop Strategy Lab starts with a close/SMA crossing example. The reusable
+rule engine supports open, high, low, close, volume, SMA, EMA, RSI, and volume
+ratio operands; `>`, `<`, crosses-above, and crosses-below comparisons; and
+field-to-field or field-to-constant rules.
+
+Backtests use these conservative execution rules:
+
+1. evaluate a signal only after bar `i` has completed;
+2. execute it at bar `i + 1` open;
+3. worsen entry and exit prices by the configured slippage;
+4. charge commission on both sides; and
+5. force-close a final open position at the last close so final equity and the
+   trade list reconcile.
+
+The first UI edits one entry condition and one exit condition. The saved model
+and engine support multiple all/any conditions for future editors. Version 0.5
+does not claim short selling, portfolio or multi-timeframe backtests,
+background/mobile notifications, dividend-adjusted performance, or broker
+execution.
 
 ## Research and margin assumptions
 
@@ -192,7 +248,9 @@ symbol,organization,target,currency,published_date,rating,source_url
 ```
 
 Invalid rows are skipped and reported. Re-importing the same
-symbol/organization/currency/date is treated as a duplicate.
+symbol/organization/currency/date is treated as a duplicate. Text exported to
+watchlist and research CSV files is neutralized when it could otherwise be
+interpreted as a spreadsheet formula.
 
 ## Data boundary
 
@@ -204,10 +262,12 @@ data rights. This repository deliberately separates:
 2. online acquisition and provider-specific JSON parsing;
 3. offline sources (`DemoDataSource` and `CsvBarLoader`);
 4. provider-independent technical calculations and summary statistics;
-5. research/event/target contracts and the margin scenario engine;
-6. optional research acquisition and provider-specific parsers;
-7. the Qt/WebChannel bridge; and
-8. the JavaScript chart renderer.
+5. provider-attributed SQLite historical storage;
+6. reusable strategy rules, backtesting, replay, scanning, and alert logic;
+7. research/event/target contracts and the margin scenario engine;
+8. optional research acquisition and provider-specific parsers;
+9. the Qt/WebChannel bridge; and
+10. the JavaScript chart renderer.
 
 ## Windows prerequisites
 
@@ -265,7 +325,7 @@ not only the raw build output.
 ## Android APK
 
 The release page provides
-`TradingViewChart-0.4.0-android-arm64-v8a.apk` for typical modern Android
+`TradingViewChart-0.5.0-android-arm64-v8a.apk` for typical modern Android
 phones. Download it on the phone, verify its SHA-256 against the adjacent
 `.sha256` file, allow installation from the browser or file manager when
 Android prompts, and open **TradingView Chart**. Android may show a Play Protect
@@ -290,16 +350,27 @@ pwsh -NoProfile -File .\scripts\bootstrap-android.ps1
 pwsh -NoProfile -File .\scripts\package-android.ps1
 ```
 
-The packaging script creates a signing key under
-`%LOCALAPPDATA%\TradingViewChart\signing` on first use, signs and verifies the
-release APK, and writes the APK plus checksum to `dist`. Back up that signing
-directory securely: Android upgrades must be signed by the same key.
+The packaging script requires the established signing key under
+`%LOCALAPPDATA%\TradingViewChart\signing`, signs and verifies the release APK,
+and writes the APK plus checksum to `dist`. Back up that signing directory
+securely: Android upgrades must be signed by the same key. Missing or partial
+signing material is an error and never silently creates a replacement key.
+
+Only for a brand-new application identity with no previous installs, explicitly
+initialize signing material once:
+
+```powershell
+pwsh -NoProfile -File .\scripts\package-android.ps1 -InitializeSigningKey
+```
 
 For CI or a disposable unsigned build:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\package-android.ps1 -SkipSigning
 ```
+
+Unsigned and debug APKs have `-unsigned` and `-debug` suffixes, so they cannot
+overwrite the canonical signed release artifact.
 
 ## CSV format
 

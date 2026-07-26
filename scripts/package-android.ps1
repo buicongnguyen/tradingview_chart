@@ -9,7 +9,8 @@ param(
         (Join-Path $env:LOCALAPPDATA 'Android\Sdk'),
     [string]$NdkVersion = '26.1.10909125',
     [string]$BuildDirectory = '',
-    [switch]$SkipSigning
+    [switch]$SkipSigning,
+    [switch]$InitializeSigningKey
 )
 
 $ErrorActionPreference = 'Stop'
@@ -130,8 +131,16 @@ if ($null -eq $unsignedApk) {
 
 $distRoot = Join-Path $repositoryRoot 'dist'
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-$packageBase = "TradingViewChart-0.4.0-android-$androidAbi"
-$outputApk = Join-Path $distRoot "$packageBase.apk"
+$packageBase = "TradingViewChart-0.5.0-android-$androidAbi"
+$artifactSuffix = if ($Configuration -eq 'Debug') {
+    '-debug'
+} elseif ($SkipSigning) {
+    '-unsigned'
+} else {
+    ''
+}
+$artifactBase = "$packageBase$artifactSuffix"
+$outputApk = Join-Path $distRoot "$artifactBase.apk"
 
 if ($Configuration -eq 'Release' -and -not $SkipSigning) {
     $signingRoot = Join-Path $env:LOCALAPPDATA 'TradingViewChart\signing'
@@ -139,30 +148,64 @@ if ($Configuration -eq 'Release' -and -not $SkipSigning) {
     $passwordFile = Join-Path $signingRoot 'release-password.xml'
     New-Item -ItemType Directory -Path $signingRoot -Force | Out-Null
 
-    if (-not (Test-Path -LiteralPath $keystore) -or
-        -not (Test-Path -LiteralPath $passwordFile)) {
+    $hasKeystore = Test-Path -LiteralPath $keystore
+    $hasPasswordFile = Test-Path -LiteralPath $passwordFile
+    if ($hasKeystore -xor $hasPasswordFile) {
+        throw "Android signing material is incomplete under $signingRoot. Restore both files from the private backup."
+    }
+    if (-not $hasKeystore) {
+        if (-not $InitializeSigningKey) {
+            throw "Android signing material is missing. Restore the existing key, or explicitly pass -InitializeSigningKey only for a brand-new application identity."
+        }
+
         $passwordBytes = New-Object byte[] 32
         [Security.Cryptography.RandomNumberGenerator]::Fill($passwordBytes)
         $password = [Convert]::ToBase64String($passwordBytes)
-        ConvertTo-SecureString $password -AsPlainText -Force |
-            Export-Clixml -LiteralPath $passwordFile
 
-        $keytool = Join-Path $env:JAVA_HOME 'bin\keytool.exe'
-        if (-not (Test-Path -LiteralPath $keytool)) {
+        $keytool = ''
+        if (-not [string]::IsNullOrWhiteSpace($env:JAVA_HOME)) {
+            $keytoolCandidate = Join-Path $env:JAVA_HOME 'bin\keytool.exe'
+            if (Test-Path -LiteralPath $keytoolCandidate) {
+                $keytool = $keytoolCandidate
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($keytool)) {
             $keytool = (Get-Command keytool -ErrorAction Stop).Source
         }
-        & $keytool -genkeypair -noprompt `
-            -keystore $keystore `
-            -storepass $password `
-            -keypass $password `
-            -alias tradingview_chart `
-            -keyalg RSA `
-            -keysize 4096 `
-            -validity 10000 `
-            -dname 'CN=TradingView Chart, OU=Personal, O=buicongnguyen, C=US'
-        if ($LASTEXITCODE -ne 0) {
-            throw "Android signing key generation failed with exit code $LASTEXITCODE."
+
+        $temporaryId = [Guid]::NewGuid().ToString('N')
+        $temporaryKeystore = Join-Path $signingRoot "$temporaryId.keystore.tmp"
+        $temporaryPasswordFile = Join-Path $signingRoot "$temporaryId.password.tmp"
+        try {
+            ConvertTo-SecureString $password -AsPlainText -Force |
+                Export-Clixml -LiteralPath $temporaryPasswordFile
+            $env:TRADINGVIEW_CHART_SIGNING_PASSWORD = $password
+            & $keytool -genkeypair -noprompt `
+                -keystore $temporaryKeystore `
+                -storepass:env TRADINGVIEW_CHART_SIGNING_PASSWORD `
+                -keypass:env TRADINGVIEW_CHART_SIGNING_PASSWORD `
+                -alias tradingview_chart `
+                -keyalg RSA `
+                -keysize 4096 `
+                -validity 10000 `
+                -dname 'CN=TradingView Chart, OU=Personal, O=buicongnguyen, C=US'
+            if ($LASTEXITCODE -ne 0) {
+                throw "Android signing key generation failed with exit code $LASTEXITCODE."
+            }
+            Move-Item -LiteralPath $temporaryPasswordFile `
+                -Destination $passwordFile
+            Move-Item -LiteralPath $temporaryKeystore -Destination $keystore
+        } finally {
+            Remove-Item Env:TRADINGVIEW_CHART_SIGNING_PASSWORD `
+                -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $temporaryKeystore `
+                -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $temporaryPasswordFile `
+                -Force -ErrorAction SilentlyContinue
+            $password = $null
         }
+    } elseif ($InitializeSigningKey) {
+        throw "Signing material already exists. -InitializeSigningKey cannot replace the established application identity."
     }
 
     $securePassword = Import-Clixml -LiteralPath $passwordFile
@@ -174,7 +217,7 @@ if ($Configuration -eq 'Release' -and -not $SkipSigning) {
         $buildTools = Get-ChildItem `
             -LiteralPath (Join-Path $AndroidSdkRoot 'build-tools') `
             -Directory |
-            Sort-Object Name -Descending |
+            Sort-Object { [version]$_.Name } -Descending |
             Select-Object -First 1
         $apksigner = Join-Path $buildTools.FullName 'apksigner.bat'
         if (-not (Test-Path -LiteralPath $apksigner)) {
@@ -208,9 +251,9 @@ if ($Configuration -eq 'Release' -and -not $SkipSigning) {
 }
 
 $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $outputApk).Hash.ToLowerInvariant()
-$checksum = Join-Path $distRoot "$packageBase.apk.sha256"
+$checksum = Join-Path $distRoot "$artifactBase.apk.sha256"
 Set-Content -LiteralPath $checksum -NoNewline `
-    -Value "$hash  $packageBase.apk"
+    -Value "$hash  $artifactBase.apk"
 
 Write-Host "Android package ready:"
 Write-Host "  APK:    $outputApk"

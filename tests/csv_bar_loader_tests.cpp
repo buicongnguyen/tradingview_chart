@@ -7,6 +7,7 @@
 #include <QDate>
 #include <QDateTime>
 #include <QSignalSpy>
+#include <QTemporaryFile>
 #include <QTest>
 #include <QTime>
 #include <QTimeZone>
@@ -22,6 +23,7 @@ private slots:
     void rejectsDuplicateTimestamp();
     void treatsNaiveIsoTimestampAsUtc();
     void rejectsOutOfRangeTimestamp();
+    void rejectsOversizedFileBeforeReading();
     void demoDataIsDeterministicAndValid();
     void demoDataIsStableAcrossRefreshes();
     void parsesYahooChartResponse();
@@ -101,6 +103,18 @@ void CsvBarLoaderTests::rejectsOutOfRangeTimestamp() {
 
     QVERIFY(!result.ok());
     QVERIFY(result.error.contains(QStringLiteral("invalid timestamp")));
+}
+
+void CsvBarLoaderTests::rejectsOversizedFileBeforeReading() {
+    QTemporaryFile file;
+    QVERIFY(file.open());
+    QVERIFY(file.resize(qint64{64 * 1024 * 1024} + 1));
+    const auto path = file.fileName();
+    file.close();
+
+    const auto result = tvchart::CsvBarLoader::loadFile(path);
+    QVERIFY(!result.ok());
+    QVERIFY(result.error.contains(QStringLiteral("64 MiB")));
 }
 
 void CsvBarLoaderTests::demoDataIsDeterministicAndValid() {

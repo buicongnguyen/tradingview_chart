@@ -17,6 +17,7 @@ private slots:
     void rejectsInvalidResearchSymbols();
     void roundTripsResearchWorkspace();
     void importsQuotedTargetCsv();
+    void boundsTargetsAndNeutralizesFormulaText();
     void parsesAlphaVantageResearch();
     void parsesAlphaVantageEarningsCalendar();
     void rejectsAlphaVantageProviderMessages();
@@ -202,6 +203,38 @@ void ResearchModelsTests::importsQuotedTargetCsv() {
     QVERIFY(roundTrip.ok());
     QCOMPARE(roundTrip.estimates.size(), std::size_t{2});
     QCOMPARE(roundTrip.estimates.front().targetPrice, 210.5);
+}
+
+void ResearchModelsTests::boundsTargetsAndNeutralizesFormulaText() {
+    const tvchart::AnalystTargetEstimate tooLarge{
+        .id = QStringLiteral("too-large"),
+        .symbol = QStringLiteral("AAPL"),
+        .organization = QStringLiteral("Firm"),
+        .targetPrice = 1'000'000'000.01,
+        .currency = QStringLiteral("USD"),
+        .publishedDate = QDate(2026, 7, 26),
+    };
+    QVERIFY(!tvchart::validateTargetEstimate(tooLarge).isEmpty());
+
+    const tvchart::AnalystTargetEstimate formulaText{
+        .id = QStringLiteral("safe-export"),
+        .symbol = QStringLiteral("AAPL"),
+        .organization = QStringLiteral("=WEBSERVICE(\"https://example.com\")"),
+        .targetPrice = 250.0,
+        .currency = QStringLiteral("USD"),
+        .publishedDate = QDate(2026, 7, 26),
+        .rating = QStringLiteral("@SUM(1,1)"),
+    };
+    const auto exported =
+        tvchart::exportTargetEstimatesCsv({formulaText});
+    QVERIFY(exported.contains(QByteArrayLiteral("\"'=WEBSERVICE(")));
+    QVERIFY(exported.contains(QByteArrayLiteral("\"'@SUM(1,1)\"")));
+
+    const auto imported = tvchart::importTargetEstimatesCsv(exported);
+    QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QCOMPARE(imported.estimates.size(), std::size_t{1});
+    QCOMPARE(imported.estimates.front().organization, formulaText.organization);
+    QCOMPARE(imported.estimates.front().rating, formulaText.rating);
 }
 
 void ResearchModelsTests::parsesAlphaVantageResearch() {

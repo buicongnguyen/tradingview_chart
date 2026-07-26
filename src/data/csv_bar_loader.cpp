@@ -13,6 +13,7 @@ namespace tvchart {
 namespace {
 
 constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
+constexpr auto kMaximumCsvFileBytes = qint64{64 * 1024 * 1024};
 
 struct CsvLineResult {
     QStringList fields;
@@ -98,10 +99,23 @@ CsvLoadResult CsvBarLoader::loadFile(const QString& path) {
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return {.error = QStringLiteral("Could not open %1: %2").arg(path, file.errorString())};
     }
-    const auto content = QString::fromUtf8(file.readAll());
+    if (file.size() < 0 || file.size() > kMaximumCsvFileBytes) {
+        return {
+            .error =
+                QStringLiteral("The CSV file exceeds the 64 MiB import limit."),
+        };
+    }
+    const auto bytes = file.read(kMaximumCsvFileBytes + 1);
     if (file.error() != QFileDevice::NoError) {
         return {.error = QStringLiteral("Could not read %1: %2").arg(path, file.errorString())};
     }
+    if (bytes.size() > kMaximumCsvFileBytes || !file.atEnd()) {
+        return {
+            .error =
+                QStringLiteral("The CSV file exceeds the 64 MiB import limit."),
+        };
+    }
+    const auto content = QString::fromUtf8(bytes);
     return parse(content);
 }
 
