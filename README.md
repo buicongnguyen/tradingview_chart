@@ -12,7 +12,21 @@ demo data. Local OHLCV CSV import remains available.
 Lightweight Charts is only the renderer. Provider availability, freshness,
 rate limits, terms, and market-data display rights still apply.
 
-## Version 0.8 features
+## Version 1.0 features
+
+- Confirmed-pivot Market Structure analysis with ATR-normalized support and
+  resistance zones, trendlines/channels, double tops/bottoms, triangles,
+  rectangles, rising/falling wedges, head-and-shoulders variants, completed
+  higher-timeframe confluence, and no-lookahead 5/20-bar outcome summaries.
+  A bounded local Lightweight Charts primitive renders the same zones and
+  boundaries on desktop and Android.
+
+- A desktop Risk & Context analyzer that answers “risky to buy—why?” with a
+  deterministic 0–100 observed-risk score, exact adverse and constructive
+  evidence, benchmark-regime context, coverage/confidence disclosure, known
+  near-term event risk, point-in-time SEC metrics, and no-lookahead comparable
+  5/20-session historical outcomes. It is not a recommendation or loss
+  probability.
 
 - A desktop Fundamental Lab backed by the official SEC EDGAR CompanyFacts API:
   filing-date-bounded annual, quarterly, and TTM series; accession/source
@@ -108,7 +122,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.8.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-1.0.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -127,7 +141,7 @@ Set a key before starting the application, then use the **Research** dock's
 
 ```powershell
 $env:ALPHA_VANTAGE_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.8.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-1.0.0-win64\tradingview_chart.exe
 ```
 
 The refresh retrieves the selected company's overview followed by its earnings
@@ -234,6 +248,30 @@ date on or after it, or strictly after it when **After market close** is
 selected. They use the prior close as the return baseline and require exact
 benchmark dates for benchmark-relative results. “Abnormal return” is a
 descriptive subtraction, not proof that the event caused the move.
+
+## Risk & Context assumptions
+
+The desktop **Risk & Context** dock uses completed raw daily bars from the
+local provider-attributed cache. Load the security and the configurable
+benchmark (default `SPY`) on **1D** at least once before analysis. Missing
+benchmark history, SEC facts, or calendar coverage reduces the displayed
+coverage instead of being interpreted as low risk.
+
+The score is adverse evidence divided by available category weight. Its
+categories are capped at 20 points for benchmark regime, 20 for
+trend/momentum, 15 for latest-candle price action, 15 for
+volatility/liquidity, 10 for price location, 10 for known events, and 10 for
+point-in-time fundamentals. Constructive evidence is shown separately and does
+not silently cancel a risk observation. The four labels—lower, moderate,
+elevated, and high—describe measured conditions, not expected returns.
+
+Historical comparisons use only information available on each setup date.
+They require the same available-category mask and risk band within ten score
+points, then report descriptive forward returns and close-to-close drawdowns.
+Fewer than 30 matches is explicitly marked as a small sample and never called
+a probability. Survivorship bias, provider retention, corporate-action
+coverage, market microstructure, and future regime changes can still make
+historical comparisons unrepresentative.
 
 ## Strategy Lab assumptions
 
@@ -436,7 +474,7 @@ not only the raw build output.
 ## Android APK
 
 The release page provides
-`TradingViewChart-0.8.0-android-arm64-v8a.apk` for typical modern Android
+`TradingViewChart-1.0.0-android-arm64-v8a.apk` for typical modern Android
 phones. Download it on the phone, verify its SHA-256 against the adjacent
 `.sha256` file, allow installation from the browser or file manager when
 Android prompts, and open **TradingView Chart**. Android may show a Play Protect

@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($QtRoot)) {
 }
 $buildDirectory = Join-Path $repositoryRoot 'build-release'
 $distRoot = Join-Path $repositoryRoot 'dist'
-$stage = Join-Path $distRoot 'TradingViewChart-0.8.0-win64'
+$stage = Join-Path $distRoot 'TradingViewChart-1.0.0-win64'
 $archive = "$stage.zip"
 
 & (Join-Path $PSScriptRoot 'configure-windows.ps1') `

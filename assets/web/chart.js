@@ -20,6 +20,8 @@
   let barIndexByTime = new Map();
   let researchEventMarkers = [];
   let researchEventMarkerPrimitive = null;
+  let marketStructure = { zones: [], lines: [] };
+  let marketStructurePrimitive = null;
   let priceLevels = [];
   let priceLevelLines = [];
   let applyingVisibleRange = false;
@@ -105,10 +107,189 @@
     },
   });
 
+  class MarketStructureRenderer {
+    constructor(primitive) {
+      this.primitive = primitive;
+    }
+
+    draw(target) {
+      const primitive = this.primitive;
+      if (primitive.series === null || primitive.chart === null) {
+        return;
+      }
+      target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+        const timeScale = primitive.chart.timeScale();
+        context.save();
+        context.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
+        context.textBaseline = "bottom";
+        for (const zone of primitive.data.zones) {
+          const x1 = timeScale.timeToCoordinate(zone.start);
+          const x2 = timeScale.timeToCoordinate(zone.end);
+          const y1 = primitive.series.priceToCoordinate(zone.high);
+          const y2 = primitive.series.priceToCoordinate(zone.low);
+          if ([x1, x2, y1, y2].some((value) => value === null)) {
+            continue;
+          }
+          const left = Math.min(x1, x2);
+          const top = Math.min(y1, y2);
+          const width = Math.max(1, Math.abs(x2 - x1));
+          const height = Math.max(2, Math.abs(y2 - y1));
+          context.globalAlpha = 0.13;
+          context.fillStyle = zone.color;
+          context.fillRect(left, top, width, height);
+          context.globalAlpha = 0.65;
+          context.strokeStyle = zone.color;
+          context.lineWidth = 1;
+          context.setLineDash([4, 3]);
+          context.strokeRect(left, top, width, height);
+          if (left < mediaSize.width && left + width > 0) {
+            context.globalAlpha = 0.9;
+            context.fillStyle = zone.color;
+            context.fillText(
+              zone.title,
+              Math.max(4, left + 4),
+              Math.max(13, top - 2),
+            );
+          }
+        }
+        context.globalAlpha = 0.9;
+        for (const line of primitive.data.lines) {
+          const x1 = timeScale.timeToCoordinate(line.start);
+          const x2 = timeScale.timeToCoordinate(line.end);
+          const y1 = primitive.series.priceToCoordinate(line.startPrice);
+          const y2 = primitive.series.priceToCoordinate(line.endPrice);
+          if ([x1, x2, y1, y2].some((value) => value === null)) {
+            continue;
+          }
+          context.beginPath();
+          context.strokeStyle = line.color;
+          context.lineWidth = 1.5;
+          context.setLineDash(line.dashed ? [6, 4] : []);
+          context.moveTo(x1, y1);
+          context.lineTo(x2, y2);
+          context.stroke();
+          if (
+            line.title.length > 0 &&
+            x2 >= 0 &&
+            x2 <= mediaSize.width &&
+            y2 >= 12 &&
+            y2 <= mediaSize.height
+          ) {
+            context.fillStyle = line.color;
+            context.fillText(line.title, Math.max(4, x2 + 4), y2 - 2);
+          }
+        }
+        context.restore();
+      });
+    }
+  }
+
+  class MarketStructurePaneView {
+    constructor(primitive) {
+      this.rendererInstance = new MarketStructureRenderer(primitive);
+    }
+
+    zOrder() {
+      return "bottom";
+    }
+
+    renderer() {
+      return this.rendererInstance;
+    }
+  }
+
+  class MarketStructurePrimitive {
+    constructor(data) {
+      this.data = data;
+      this.chart = null;
+      this.series = null;
+      this.requestUpdate = null;
+      this.views = [new MarketStructurePaneView(this)];
+    }
+
+    attached({ chart: attachedChart, series, requestUpdate }) {
+      this.chart = attachedChart;
+      this.series = series;
+      this.requestUpdate = requestUpdate;
+      requestUpdate();
+    }
+
+    detached() {
+      this.chart = null;
+      this.series = null;
+      this.requestUpdate = null;
+    }
+
+    paneViews() {
+      return this.views;
+    }
+
+    updateAllViews() {}
+
+    setData(data) {
+      this.data = data;
+      this.requestUpdate?.();
+    }
+  }
+
+  function applyMarketStructure() {
+    if (priceSeries === null) {
+      return;
+    }
+    if (marketStructurePrimitive === null) {
+      marketStructurePrimitive =
+        new MarketStructurePrimitive(marketStructure);
+      priceSeries.attachPrimitive(marketStructurePrimitive);
+    } else {
+      marketStructurePrimitive.setData(marketStructure);
+    }
+  }
+
+  function setMarketStructure(value) {
+    const input = value ?? {};
+    const zones = Array.from(input.zones ?? [], (zone) => ({
+      start: Number(zone.start),
+      end: Number(zone.end),
+      low: Number(zone.low),
+      high: Number(zone.high),
+      color: String(zone.color ?? "#787b86"),
+      title: String(zone.title ?? "").slice(0, 80),
+    })).filter((zone) =>
+      Number.isFinite(zone.start) &&
+      Number.isFinite(zone.end) &&
+      zone.end >= zone.start &&
+      Number.isFinite(zone.low) &&
+      Number.isFinite(zone.high) &&
+      zone.low > 0 &&
+      zone.high >= zone.low);
+    const lines = Array.from(input.lines ?? [], (line) => ({
+      start: Number(line.start),
+      end: Number(line.end),
+      startPrice: Number(line.startPrice),
+      endPrice: Number(line.endPrice),
+      color: String(line.color ?? "#2962ff"),
+      title: String(line.title ?? "").slice(0, 80),
+      dashed: Boolean(line.dashed),
+    })).filter((line) =>
+      Number.isFinite(line.start) &&
+      Number.isFinite(line.end) &&
+      line.end > line.start &&
+      Number.isFinite(line.startPrice) &&
+      Number.isFinite(line.endPrice) &&
+      line.startPrice > 0 &&
+      line.endPrice > 0);
+    marketStructure = {
+      zones: zones.slice(0, 8),
+      lines: lines.slice(0, Math.max(0, 16 - zones.length)),
+    };
+    applyMarketStructure();
+  }
+
   function createPriceSeries() {
     const palette = colors();
     if (priceSeries !== null) {
       researchEventMarkerPrimitive = null;
+      marketStructurePrimitive = null;
       priceLevelLines = [];
       chart.removeSeries(priceSeries);
     }
@@ -137,6 +318,7 @@
     applyPriceScaleMode();
     setSeriesData();
     applyResearchEventMarkers();
+    applyMarketStructure();
     applyPriceLevels();
   }
 
@@ -682,6 +864,9 @@
       case "events":
         setResearchEvents(command.events ?? []);
         break;
+      case "marketStructure":
+        setMarketStructure(command.structure ?? {});
+        break;
       case "levels":
         setPriceLevels(command.levels ?? []);
         break;
@@ -737,6 +922,13 @@
       bridge.researchEventsChanged.connect((events) => {
         try {
           setResearchEvents(events);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.marketStructureChanged.connect((structure) => {
+        try {
+          setMarketStructure(structure);
         } catch (error) {
           reportError(error);
         }

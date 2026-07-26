@@ -156,7 +156,7 @@ void EventIntelligenceClient::fetchFredCalendar(Callback callback) {
     const auto requestGeneration = generation_;
     auto* reply = network_->get(providerRequest(
         url,
-        QStringLiteral("TradingViewChart/0.8.0 (Qt; personal client)")));
+        QStringLiteral("TradingViewChart/1.0.0 (Qt; personal client)")));
     activeReply_ = reply;
     consumeBoundedNetworkReply(
         reply,

@@ -7,7 +7,9 @@ implemented on 2026-07-26; Android package implemented and emulator-tested on
 implemented and package-verified on 2026-07-26; Phase 11 data integrity,
 strategy robustness, and portfolio-risk packages implemented on 2026-07-26;
 Phase 12 point-in-time fundamentals, screening, valuation, and event-impact
-packages implemented on 2026-07-26.
+packages implemented on 2026-07-26; Phase 13 evidence-based risk and context
+analysis implemented on 2026-07-26; Phase 14 no-repaint market structure and
+pattern intelligence implemented on 2026-07-26.
 
 ## 1. Goal and non-goals
 
@@ -337,9 +339,40 @@ require an as-of raw daily close; peer values never mix units; a ticker/CIK
 change cannot mix issuer facts; all unavailable inputs stay explicit; and the
 native, renderer, Windows-package, and Android portability gates pass.
 
+### Phase 13 — evidence-based risk and context analysis
+
+Implement the reviewed
+[`PHASE_13_RISK_CONTEXT_ANALYZER_PLAN.md`](PHASE_13_RISK_CONTEXT_ANALYZER_PLAN.md):
+a deterministic daily-chart risk score, benchmark-regime context, explainable
+candle/trend/volatility/location/event/fundamental evidence, constructive
+counter-evidence, coverage disclosure, and no-lookahead historical comparable
+outcomes.
+
+Gate: every score reconciles to capped category points; unavailable categories
+reduce visible coverage rather than implying safety; historical examples use
+the same category mask and only point-in-time inputs; small samples are never
+called probabilities; and native, renderer, Windows-package, and Android
+portability gates pass.
+
+### Phase 14 — market structure and pattern intelligence
+
+Implement the reviewed
+[`PHASE_14_MARKET_STRUCTURE_PLAN.md`](PHASE_14_MARKET_STRUCTURE_PLAN.md):
+confirmed pivots, ATR-normalized support/resistance zones, trendlines and
+channels, bounded classic-pattern detection, completed higher-timeframe
+confluence, and descriptive point-in-time pattern outcomes. Render the
+validated structures through a local Lightweight Charts series primitive and
+reuse the evidence in Risk & Context.
+
+Gate: formation timestamps use only confirmed anchors and completed-close
+breakouts; historical outcomes begin at the detection close; the current
+incomplete higher-timeframe bucket is excluded; outputs and overlays remain
+bounded; and native, renderer, Windows-package, live-data, and signed Android
+portability gates pass.
+
 ## 5. Remaining follow-on roadmap
 
-After version 0.8 is stable:
+After version 1.0 is stable:
 
 1. Generalize the implemented `MarketDataClient` behind `IMarketDataSource`
    when a third provider or streaming transport is added.
@@ -426,3 +459,9 @@ same-unit peer comparison, a locally cached current-universe screen,
 descriptive event-impact windows, and de-duplicated opt-in foreground
 fundamental alerts. Missing facts, prices, comparable units, or benchmark
 history must remain explicit.
+Version 0.9 additionally requires an explainable observed-risk assessment,
+benchmark and input coverage, dated evidence, point-in-time historical
+comparables, and explicit small-sample and educational-use limitations.
+Version 1.0 additionally requires confirmed market-structure timestamps,
+bounded local overlays, completed higher-timeframe confluence, point-in-time
+pattern outcomes, and deterministic reuse by the Risk & Context analyzer.

@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("buicongnguyen"));
     QCoreApplication::setApplicationName(QStringLiteral("TradingViewChart"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.8.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.0.0"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
@@ -94,9 +94,18 @@ int main(int argc, char* argv[]) {
                 QStringLiteral("strategyRunBacktest"));
             auto* strategyTrades = window.findChild<QTableWidget*>(
                 QStringLiteral("strategyTradesTable"));
+            auto* marketStructureRun =
+                window.findChild<QPushButton*>(
+                    QStringLiteral(
+                        "marketStructureAnalyzeButton"));
+            auto* marketStructurePatterns =
+                window.findChild<QTableWidget*>(
+                    QStringLiteral(
+                        "marketStructurePatternTable"));
             if (!indicatorTable || !scaleSelector || !targetTable ||
                 !eventTable || !marginValue || !strategyRun ||
-                !strategyTrades) {
+                !strategyTrades || !marketStructureRun ||
+                !marketStructurePatterns) {
                 qCritical() << "SMOKE_ANALYSIS_CONTROLS_MISSING";
                 application.exit(4);
                 return;

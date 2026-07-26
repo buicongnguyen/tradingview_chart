@@ -106,7 +106,7 @@ quint64 AndroidHttpClient::get(
 
     const auto javaUrl = QJniObject::fromString(url.toString(QUrl::FullyEncoded));
     const auto userAgent = QJniObject::fromString(
-        QStringLiteral("TradingViewChart/0.8.0 (Qt 6; Android)"));
+        QStringLiteral("TradingViewChart/1.0.0 (Qt 6; Android)"));
     QJniObject::callStaticMethod<void>(
         "com/buicongnguyen/tradingviewchart/AndroidHttpClient",
         "get",
