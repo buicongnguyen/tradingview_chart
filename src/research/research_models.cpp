@@ -21,6 +21,8 @@ namespace tvchart {
 namespace {
 
 constexpr auto kMaximumTargetPrice = 1'000'000'000.0;
+constexpr auto kMaximumResearchWorkspaceBytes =
+    qsizetype{8 * 1024 * 1024};
 
 [[nodiscard]] bool finitePositive(const double value) noexcept {
     return std::isfinite(value) && value > 0.0;
@@ -391,8 +393,14 @@ QString validateTargetEstimate(const AnalystTargetEstimate& estimate) {
 QString validateCompanySnapshot(const CompanyResearchSnapshot& snapshot) {
     if (!validSymbol(snapshot.symbol) ||
         snapshot.provider.trimmed().isEmpty() ||
+        snapshot.provider.size() > 120 ||
         snapshot.asOfUtc <= 0 ||
-        snapshot.currency.size() > 12) {
+        snapshot.name.size() > 240 ||
+        snapshot.cik.size() > 32 ||
+        snapshot.exchange.size() > 80 ||
+        snapshot.currency.size() > 12 ||
+        snapshot.sector.size() > 160 ||
+        snapshot.industry.size() > 160) {
         return QStringLiteral("Company research identity or provenance is invalid.");
     }
     const std::array values{
@@ -505,38 +513,58 @@ std::optional<TargetConsensusSummary> summarizeOrganizationTargets(
 }
 
 QByteArray serializeResearchWorkspace(const ResearchWorkspace& workspace) {
+    if (workspace.events.size() > ResearchWorkspace::maximumEvents ||
+        workspace.targetEstimates.size() >
+            ResearchWorkspace::maximumTargetEstimates ||
+        workspace.companySnapshots.size() >
+            ResearchWorkspace::maximumCompanySnapshots) {
+        return {};
+    }
     QJsonArray events;
     for (const auto& event : workspace.events) {
-        if (validateResearchEvent(event).isEmpty()) {
-            events.append(eventToJson(event));
+        if (!validateResearchEvent(event).isEmpty()) {
+            return {};
         }
+        events.append(eventToJson(event));
     }
     QJsonArray targets;
     for (const auto& estimate : workspace.targetEstimates) {
-        if (validateTargetEstimate(estimate).isEmpty()) {
-            targets.append(targetToJson(estimate));
+        if (!validateTargetEstimate(estimate).isEmpty()) {
+            return {};
         }
+        targets.append(targetToJson(estimate));
     }
     QJsonArray snapshots;
     for (const auto& snapshot : workspace.companySnapshots) {
-        if (validateCompanySnapshot(snapshot).isEmpty()) {
-            snapshots.append(snapshotToJson(snapshot));
+        if (!validateCompanySnapshot(snapshot).isEmpty()) {
+            return {};
         }
+        snapshots.append(snapshotToJson(snapshot));
     }
-    return QJsonDocument(QJsonObject{
-                             {
-                                 QStringLiteral("schemaVersion"),
-                                 ResearchWorkspace::currentSchemaVersion,
-                             },
-                             {QStringLiteral("events"), events},
-                             {QStringLiteral("targetEstimates"), targets},
-                             {QStringLiteral("companySnapshots"), snapshots},
-                         })
-        .toJson(QJsonDocument::Compact);
+    const auto payload =
+        QJsonDocument(QJsonObject{
+                          {
+                              QStringLiteral("schemaVersion"),
+                              ResearchWorkspace::currentSchemaVersion,
+                          },
+                          {QStringLiteral("events"), events},
+                          {QStringLiteral("targetEstimates"), targets},
+                          {QStringLiteral("companySnapshots"), snapshots},
+                      })
+            .toJson(QJsonDocument::Compact);
+    return payload.size() <= kMaximumResearchWorkspaceBytes
+               ? payload
+               : QByteArray{};
 }
 
 ResearchWorkspaceLoadResult deserializeResearchWorkspace(
     const QByteArray& json) {
+    if (json.size() > kMaximumResearchWorkspaceBytes) {
+        return {
+            .error =
+                QStringLiteral("Saved research data exceeds the 8 MiB safety limit."),
+        };
+    }
     QJsonParseError parseError;
     const auto document = QJsonDocument::fromJson(json, &parseError);
     if (parseError.error != QJsonParseError::NoError ||

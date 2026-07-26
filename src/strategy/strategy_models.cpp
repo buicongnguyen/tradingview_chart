@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QSet>
 
 #include <cmath>
 #include <limits>
@@ -17,6 +18,8 @@ constexpr auto kMaximumConditions = std::size_t{16};
 constexpr auto kMaximumPeriod = std::uint32_t{500};
 constexpr auto kMaximumAbsoluteConstant = 1.0e12;
 constexpr auto kMaximumMultiplier = 1.0e6;
+constexpr auto kMaximumSavedStrategies = std::size_t{64};
+constexpr auto kMaximumStrategyLibraryBytes = qsizetype{1024 * 1024};
 
 [[nodiscard]] bool periodField(const StrategyField field) noexcept {
     return field == StrategyField::SimpleMovingAverage ||
@@ -74,11 +77,17 @@ constexpr auto kMaximumMultiplier = 1.0e6;
 }
 
 [[nodiscard]] QJsonObject operandToJson(const StrategyOperand& operand) {
-    return {
+    QJsonObject result{
         {QStringLiteral("field"), strategyFieldId(operand.field)},
         {QStringLiteral("period"), static_cast<int>(operand.period)},
         {QStringLiteral("multiplier"), operand.multiplier},
     };
+    if (operand.timeframe) {
+        result.insert(
+            QStringLiteral("timeframe"),
+            static_cast<int>(*operand.timeframe));
+    }
+    return result;
 }
 
 [[nodiscard]] std::optional<StrategyOperand> operandFromJson(
@@ -101,6 +110,15 @@ constexpr auto kMaximumMultiplier = 1.0e6;
         .period = static_cast<std::uint32_t>(period),
         .multiplier = multiplier,
     };
+    if (object.contains(QStringLiteral("timeframe"))) {
+        const auto timeframe =
+            object.value(QStringLiteral("timeframe")).toInt(-1);
+        if (timeframe < static_cast<int>(Timeframe::OneMinute) ||
+            timeframe > static_cast<int>(Timeframe::OneDay)) {
+            return std::nullopt;
+        }
+        operand.timeframe = static_cast<Timeframe>(timeframe);
+    }
     if (!validateStrategyOperand(operand).isEmpty()) {
         return std::nullopt;
     }
@@ -280,6 +298,11 @@ QString validateStrategyOperand(const StrategyOperand& operand) {
         (operand.period == 0 || operand.period > kMaximumPeriod)) {
         return QStringLiteral("Strategy indicator period is invalid.");
     }
+    if (operand.timeframe &&
+        (*operand.timeframe < Timeframe::OneMinute ||
+         *operand.timeframe > Timeframe::OneDay)) {
+        return QStringLiteral("Strategy operand timeframe is invalid.");
+    }
     return {};
 }
 
@@ -342,8 +365,10 @@ StrategyLoadResult deserializeStrategy(const QByteArray& json) {
         return {.error = QStringLiteral("Saved strategy JSON is invalid.")};
     }
     const auto object = document.object();
-    if (object.value(QStringLiteral("schemaVersion")).toInt(-1) !=
-        StrategyDefinition::currentSchemaVersion) {
+    const auto schemaVersion =
+        object.value(QStringLiteral("schemaVersion")).toInt(-1);
+    if (schemaVersion != 1 &&
+        schemaVersion != StrategyDefinition::currentSchemaVersion) {
         return {.error = QStringLiteral("Saved strategy schema is unsupported.")};
     }
     const auto entry = groupFromJson(object.value(QStringLiteral("entry")));
@@ -361,6 +386,77 @@ StrategyLoadResult deserializeStrategy(const QByteArray& json) {
         return {.error = error};
     }
     return {.strategy = std::move(strategy)};
+}
+
+QByteArray serializeStrategyLibrary(
+    const std::vector<StrategyDefinition>& strategies) {
+    if (strategies.size() > kMaximumSavedStrategies) {
+        return {};
+    }
+    QJsonArray entries;
+    QSet<QString> identities;
+    for (const auto& strategy : strategies) {
+        const auto serialized = serializeStrategy(strategy);
+        const auto document = QJsonDocument::fromJson(serialized);
+        const auto identity = strategy.id.trimmed();
+        if (serialized.isEmpty() || !document.isObject() ||
+            identities.contains(identity)) {
+            return {};
+        }
+        identities.insert(identity);
+        entries.append(document.object());
+    }
+    return QJsonDocument(QJsonObject{
+        {QStringLiteral("schemaVersion"), 1},
+        {QStringLiteral("strategies"), entries},
+    }).toJson(QJsonDocument::Compact);
+}
+
+StrategyLibraryLoadResult deserializeStrategyLibrary(const QByteArray& json) {
+    if (json.isEmpty()) {
+        return {};
+    }
+    if (json.size() > kMaximumStrategyLibraryBytes) {
+        return {.error = QStringLiteral("Saved strategy library is too large.")};
+    }
+    QJsonParseError parseError;
+    const auto document = QJsonDocument::fromJson(json, &parseError);
+    if (parseError.error != QJsonParseError::NoError ||
+        !document.isObject()) {
+        return {.error = QStringLiteral("Saved strategy library JSON is invalid.")};
+    }
+    const auto object = document.object();
+    if (object.value(QStringLiteral("schemaVersion")).toInt(-1) != 1 ||
+        !object.value(QStringLiteral("strategies")).isArray()) {
+        return {.error = QStringLiteral("Saved strategy library schema is unsupported.")};
+    }
+    const auto entries = object.value(QStringLiteral("strategies")).toArray();
+    if (entries.size() > static_cast<qsizetype>(kMaximumSavedStrategies)) {
+        return {.error = QStringLiteral("Saved strategy library is too large.")};
+    }
+
+    StrategyLibraryLoadResult result;
+    result.strategies.reserve(static_cast<std::size_t>(entries.size()));
+    QSet<QString> identities;
+    for (const auto& entry : entries) {
+        if (!entry.isObject()) {
+            return {.error = QStringLiteral("Saved strategy library contains an invalid entry.")};
+        }
+        auto loaded = deserializeStrategy(
+            QJsonDocument(entry.toObject()).toJson(QJsonDocument::Compact));
+        const auto identity = loaded.strategy.id.trimmed();
+        if (!loaded.ok() || identities.contains(identity)) {
+            return {
+                .error =
+                    loaded.ok()
+                        ? QStringLiteral("Saved strategy identities must be unique.")
+                        : loaded.error,
+            };
+        }
+        identities.insert(identity);
+        result.strategies.push_back(std::move(loaded.strategy));
+    }
+    return result;
 }
 
 } // namespace tvchart

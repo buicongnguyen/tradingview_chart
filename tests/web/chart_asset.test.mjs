@@ -31,6 +31,10 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /priceSeries\.setData/);
   assert.match(source, /bridge\.seriesChanged\.connect/);
   assert.match(source, /bridge\.indicatorsChanged\.connect/);
+  assert.match(source, /bridge\.researchEventsChanged\.connect/);
+  assert.match(source, /bridge\.priceLevelsChanged\.connect/);
+  assert.match(source, /bridge\.visibleRangeChanged\.connect/);
+  assert.match(source, /bridge\.crosshairTimeChanged\.connect/);
   assert.match(source, /bridge\.priceScaleModeChanged\.connect/);
   assert.match(source, /window\.mobileChart = Object\.freeze/);
   assert.match(source, /receiveMobileCommand/);
@@ -41,6 +45,10 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /volume-sma/);
   assert.match(source, /LightweightCharts\.LineSeries/);
   assert.match(source, /LightweightCharts\.HistogramSeries/);
+  assert.match(source, /LightweightCharts\.createSeriesMarkers/);
+  assert.match(source, /priceSeries\.createPriceLine/);
+  assert.match(source, /subscribeVisibleTimeRangeChange/);
+  assert.match(source, /chart\.setCrosshairPosition/);
   assert.match(source, /chart\.removePane/);
   assert.match(source, /sourceLabel\.textContent\s*=\s*String\(source\)/);
   assert.match(source, /const rangesOverlap\s*=/);

@@ -18,6 +18,15 @@
   let indicatorSeries = [];
   let indicatorCalculations = [];
   let barIndexByTime = new Map();
+  let researchEventMarkers = [];
+  let researchEventMarkerPrimitive = null;
+  let priceLevels = [];
+  let priceLevelLines = [];
+  let applyingVisibleRange = false;
+  let applyingCrosshair = false;
+  let suppressedVisibleRange = null;
+  let suppressedCrosshairTime = null;
+  let lastReportedCrosshairTime = null;
 
   const colors = () => dark
     ? {
@@ -99,6 +108,8 @@
   function createPriceSeries() {
     const palette = colors();
     if (priceSeries !== null) {
+      researchEventMarkerPrimitive = null;
+      priceLevelLines = [];
       chart.removeSeries(priceSeries);
     }
 
@@ -125,6 +136,101 @@
     }
     applyPriceScaleMode();
     setSeriesData();
+    applyResearchEventMarkers();
+    applyPriceLevels();
+  }
+
+  function applyResearchEventMarkers() {
+    if (
+      priceSeries === null ||
+      typeof LightweightCharts.createSeriesMarkers !== "function"
+    ) {
+      return;
+    }
+    if (researchEventMarkerPrimitive === null) {
+      researchEventMarkerPrimitive = LightweightCharts.createSeriesMarkers(
+        priceSeries,
+        researchEventMarkers,
+      );
+    } else {
+      researchEventMarkerPrimitive.setMarkers(researchEventMarkers);
+    }
+  }
+
+  function setResearchEvents(values) {
+    researchEventMarkers = Array.from(values ?? [], (event) => ({
+      time: Number(event.time),
+      position: String(event.position ?? "aboveBar"),
+      shape: String(event.shape ?? "circle"),
+      color: String(event.color ?? "#787b86"),
+      text: String(event.text ?? "EV"),
+    })).filter((event) => Number.isFinite(event.time))
+      .sort((left, right) => left.time - right.time);
+    applyResearchEventMarkers();
+  }
+
+  function applyPriceLevels() {
+    if (priceSeries === null) {
+      return;
+    }
+    for (const line of priceLevelLines) {
+      priceSeries.removePriceLine(line);
+    }
+    priceLevelLines = priceLevels.map((level) =>
+      priceSeries.createPriceLine({
+        price: level.price,
+        color: level.color,
+        lineWidth: 2,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: level.title,
+      }));
+  }
+
+  function setPriceLevels(values) {
+    priceLevels = Array.from(values ?? [], (level) => ({
+      id: String(level.id ?? ""),
+      price: Number(level.price),
+      title: String(level.title ?? ""),
+      color: String(level.color ?? "#2962ff"),
+    })).filter((level) =>
+      level.id.length > 0 &&
+      Number.isFinite(level.price) &&
+      level.price > 0);
+    applyPriceLevels();
+  }
+
+  function setVisibleRange(from, to) {
+    const start = Number(from);
+    const end = Number(to);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+      return;
+    }
+    suppressedVisibleRange = { from: start, to: end };
+    applyingVisibleRange = true;
+    chart.timeScale().setVisibleRange({ from: start, to: end });
+    queueMicrotask(() => {
+      applyingVisibleRange = false;
+    });
+  }
+
+  function setCrosshairTime(value) {
+    const timestamp = Number(value);
+    suppressedCrosshairTime = timestamp;
+    applyingCrosshair = true;
+    if (timestamp < 0 || !barIndexByTime.has(timestamp) || priceSeries === null) {
+      chart.clearCrosshairPosition();
+    } else {
+      const matchingBar = bars[barIndexByTime.get(timestamp)];
+      chart.setCrosshairPosition(
+        matchingBar.close,
+        matchingBar.time,
+        priceSeries,
+      );
+    }
+    queueMicrotask(() => {
+      applyingCrosshair = false;
+    });
   }
 
   function applyPriceScaleMode() {
@@ -491,6 +597,48 @@
 
   chart.subscribeCrosshairMove((parameter) => {
     updateCrosshairDetails(parameter.time ?? bars.at(-1)?.time);
+    const timestamp = parameter.time === undefined
+      ? -1
+      : Number(parameter.time);
+    if (timestamp === suppressedCrosshairTime) {
+      suppressedCrosshairTime = null;
+      lastReportedCrosshairTime = timestamp;
+      return;
+    }
+    if (
+      bridge !== null &&
+      !applyingCrosshair &&
+      typeof bridge.reportCrosshairTime === "function"
+    ) {
+      if (timestamp !== lastReportedCrosshairTime) {
+        lastReportedCrosshairTime = timestamp;
+        bridge.reportCrosshairTime(timestamp);
+      }
+    }
+  });
+
+  chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+    if (
+      range === null ||
+      applyingVisibleRange ||
+      bridge === null ||
+      typeof bridge.reportVisibleRange !== "function"
+    ) {
+      return;
+    }
+    const from = Number(range.from);
+    const to = Number(range.to);
+    if (
+      suppressedVisibleRange !== null &&
+      Math.abs(from - suppressedVisibleRange.from) < 1 &&
+      Math.abs(to - suppressedVisibleRange.to) < 1
+    ) {
+      suppressedVisibleRange = null;
+      return;
+    }
+    if (Number.isFinite(from) && Number.isFinite(to) && to > from) {
+      bridge.reportVisibleRange(from, to);
+    }
   });
 
   function reportError(error) {
@@ -530,6 +678,12 @@
         break;
       case "indicators":
         setIndicators(command.calculations ?? []);
+        break;
+      case "events":
+        setResearchEvents(command.events ?? []);
+        break;
+      case "levels":
+        setPriceLevels(command.levels ?? []);
         break;
       case "fit":
         chart.timeScale().fitContent();
@@ -576,6 +730,34 @@
       bridge.indicatorsChanged.connect((calculations) => {
         try {
           setIndicators(calculations);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.researchEventsChanged.connect((events) => {
+        try {
+          setResearchEvents(events);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.priceLevelsChanged.connect((levels) => {
+        try {
+          setPriceLevels(levels);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.visibleRangeChanged.connect((from, to) => {
+        try {
+          setVisibleRange(from, to);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.crosshairTimeChanged.connect((timestamp) => {
+        try {
+          setCrosshairTime(timestamp);
         } catch (error) {
           reportError(error);
         }

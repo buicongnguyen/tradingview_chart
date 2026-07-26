@@ -1,11 +1,16 @@
 #include "main_window.hpp"
 
+#include "analysis/comparison_analysis.hpp"
 #include "data/csv_bar_loader.hpp"
 #include "data/demo_data_source.hpp"
 #include "data/historical_data_store.hpp"
 #include "data/market_data_client.hpp"
+#include "fundamentals/fundamental_store.hpp"
+#include "fundamentals/fundamental_workbench_widget.hpp"
 #include "research/alpha_vantage_research_client.hpp"
+#include "research/event_intelligence_client.hpp"
 #include "research/margin_risk.hpp"
+#include "portfolio/portfolio_widget.hpp"
 #include "strategy/strategy_lab_widget.hpp"
 
 #include <QAbstractItemView>
@@ -42,6 +47,7 @@
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSpinBox>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QStandardPaths>
 #include <QStringList>
@@ -247,6 +253,9 @@ MainWindow::MainWindow(
     refreshResearchDisplay();
     recalculateMarginRisk();
     reloadActiveSource();
+    if (comparisonChartView_->isVisible()) {
+        loadComparisonData();
+    }
 }
 
 MainWindow::~MainWindow() = default;
@@ -256,8 +265,18 @@ void MainWindow::buildUi() {
     resize(1500, 900);
 
     chartView_ = new ChartView(this);
+    comparisonChartView_ = new ChartView(this);
+    comparisonChartView_->setVisible(false);
+    chartSplitter_ = new QSplitter(Qt::Horizontal, this);
+    chartSplitter_->setChildrenCollapsible(false);
+    chartSplitter_->addWidget(chartView_);
+    chartSplitter_->addWidget(comparisonChartView_);
+    chartSplitter_->setStretchFactor(0, 1);
+    chartSplitter_->setStretchFactor(1, 1);
     marketDataClient_ = new MarketDataClient(this);
+    comparisonDataClient_ = new MarketDataClient(this);
     researchClient_ = new AlphaVantageResearchClient(this);
+    eventIntelligenceClient_ = new EventIntelligenceClient(this);
     const auto historyPath =
         settingsEnabled_
             ? QDir(
@@ -268,6 +287,16 @@ void MainWindow::buildUi() {
     historyStore_ =
         std::make_unique<HistoricalDataStore>(historyPath);
     const auto historyAvailable = historyStore_->open();
+    const auto fundamentalPath =
+        settingsEnabled_
+            ? QDir(
+                  QStandardPaths::writableLocation(
+                      QStandardPaths::AppDataLocation))
+                  .filePath(QStringLiteral("fundamentals.sqlite"))
+            : QStringLiteral(":memory:");
+    fundamentalStore_ =
+        std::make_unique<FundamentalStore>(fundamentalPath);
+    const auto fundamentalAvailable = fundamentalStore_->open();
     refreshTimer_ = new QTimer(this);
     refreshTimer_->setSingleShot(true);
     connect(refreshTimer_, &QTimer::timeout, this, &MainWindow::loadMarketData);
@@ -280,7 +309,7 @@ void MainWindow::buildUi() {
         &MainWindow::refreshDataStatusDisplay);
     statusAgeTimer_->start();
 
-    setCentralWidget(chartView_);
+    setCentralWidget(chartSplitter_);
     connect(chartView_, &ChartView::chartReady, this, &MainWindow::chartReady);
     connect(
         chartView_,
@@ -288,6 +317,52 @@ void MainWindow::buildUi() {
         this,
         [this](const QString& message) {
             statusBar()->showMessage(message);
+        });
+    connect(
+        comparisonChartView_,
+        &ChartView::chartError,
+        this,
+        [this](const QString& message) {
+            if (comparisonStatusLabel_) {
+                comparisonStatusLabel_->setText(
+                    tr("Comparison error: %1").arg(message));
+            }
+        });
+    connect(
+        chartView_->bridge(),
+        &ChartBridge::visibleRangeReported,
+        comparisonChartView_->bridge(),
+        [this](const qint64 from, const qint64 to) {
+            if (comparisonChartView_->isVisible()) {
+                comparisonChartView_->bridge()->setVisibleRange(from, to);
+            }
+        });
+    connect(
+        comparisonChartView_->bridge(),
+        &ChartBridge::visibleRangeReported,
+        chartView_->bridge(),
+        [this](const qint64 from, const qint64 to) {
+            if (comparisonChartView_->isVisible()) {
+                chartView_->bridge()->setVisibleRange(from, to);
+            }
+        });
+    connect(
+        chartView_->bridge(),
+        &ChartBridge::crosshairTimeReported,
+        comparisonChartView_->bridge(),
+        [this](const qint64 timestamp) {
+            if (comparisonChartView_->isVisible()) {
+                comparisonChartView_->bridge()->setCrosshairTime(timestamp);
+            }
+        });
+    connect(
+        comparisonChartView_->bridge(),
+        &ChartBridge::crosshairTimeReported,
+        chartView_->bridge(),
+        [this](const qint64 timestamp) {
+            if (comparisonChartView_->isVisible()) {
+                chartView_->bridge()->setCrosshairTime(timestamp);
+            }
         });
 
     auto* fileMenu = menuBar()->addMenu(tr("&File"));
@@ -328,8 +403,13 @@ void MainWindow::buildUi() {
     connect(
         fitAction,
         &QAction::triggered,
-        chartView_->bridge(),
-        &ChartBridge::requestFit);
+        this,
+        [this] {
+            chartView_->bridge()->requestFit();
+            if (comparisonChartView_->isVisible()) {
+                comparisonChartView_->bridge()->requestFit();
+            }
+        });
 
     darkThemeAction_ = viewMenu->addAction(tr("&Dark theme"));
     darkThemeAction_->setCheckable(true);
@@ -370,6 +450,38 @@ void MainWindow::buildUi() {
         [this](int) {
             if (!restoringSettings_) {
                 reloadActiveSource();
+                if (comparisonChartView_->isVisible()) {
+                    loadComparisonData();
+                }
+                saveSettingsNow();
+            }
+        });
+
+    toolbar->addSeparator();
+    toolbar->addWidget(new QLabel(tr("Price basis"), toolbar));
+    priceBasisSelector_ = new QComboBox(toolbar);
+    priceBasisSelector_->setObjectName(
+        QStringLiteral("priceBasisSelector"));
+    for (const auto mode : {
+             PriceAdjustmentMode::Raw,
+             PriceAdjustmentMode::SplitAdjusted,
+             PriceAdjustmentMode::TotalReturn,
+         }) {
+        priceBasisSelector_->addItem(
+            priceAdjustmentModeLabel(mode),
+            static_cast<int>(mode));
+    }
+    toolbar->addWidget(priceBasisSelector_);
+    connect(
+        priceBasisSelector_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int) {
+            if (!restoringSettings_) {
+                reloadActiveSource();
+                if (comparisonChartView_->isVisible()) {
+                    loadComparisonData();
+                }
                 saveSettingsNow();
             }
         });
@@ -387,6 +499,8 @@ void MainWindow::buildUi() {
         this,
         [this](int) {
             chartView_->bridge()->setChartStyle(
+                styleSelector_->currentData().toString());
+            comparisonChartView_->bridge()->setChartStyle(
                 styleSelector_->currentData().toString());
             saveSettingsNow();
         });
@@ -406,8 +520,70 @@ void MainWindow::buildUi() {
         [this](int) {
             chartView_->bridge()->setPriceScaleMode(
                 scaleSelector_->currentData().toString());
+            comparisonChartView_->bridge()->setPriceScaleMode(
+                scaleSelector_->currentData().toString());
             saveSettingsNow();
         });
+
+    toolbar->addSeparator();
+    toolbar->addWidget(new QLabel(tr("Layout"), toolbar));
+    chartLayoutSelector_ = new QComboBox(toolbar);
+    chartLayoutSelector_->setObjectName(QStringLiteral("chartLayoutSelector"));
+    chartLayoutSelector_->addItem(tr("Single"), QStringLiteral("single"));
+    chartLayoutSelector_->addItem(
+        tr("Compare ↔"),
+        QStringLiteral("horizontal"));
+    chartLayoutSelector_->addItem(
+        tr("Compare ↕"),
+        QStringLiteral("vertical"));
+    toolbar->addWidget(chartLayoutSelector_);
+    connect(
+        chartLayoutSelector_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int) {
+            setChartLayout(chartLayoutSelector_->currentData().toString());
+            saveSettingsNow();
+        });
+
+    comparisonSymbolInput_ = new QLineEdit(toolbar);
+    comparisonSymbolInput_->setObjectName(
+        QStringLiteral("comparisonSymbolInput"));
+    comparisonSymbolInput_->setPlaceholderText(tr("Compare symbol"));
+    comparisonSymbolInput_->setMaximumWidth(120);
+    toolbar->addWidget(comparisonSymbolInput_);
+    auto* loadComparisonAction =
+        toolbar->addAction(tr("Load comparison"));
+    connect(
+        loadComparisonAction,
+        &QAction::triggered,
+        this,
+        &MainWindow::loadComparisonData);
+    connect(
+        comparisonSymbolInput_,
+        &QLineEdit::returnPressed,
+        this,
+        &MainWindow::loadComparisonData);
+
+    comparisonStatusLabel_ = new QLabel(tr("Comparison off"), toolbar);
+    comparisonStatusLabel_->setObjectName(
+        QStringLiteral("comparisonStatusLabel"));
+    comparisonStatusLabel_->setMinimumWidth(240);
+    toolbar->addWidget(comparisonStatusLabel_);
+
+    toolbar->addSeparator();
+    auto* addLevelAction = toolbar->addAction(tr("Add level…"));
+    connect(
+        addLevelAction,
+        &QAction::triggered,
+        this,
+        &MainWindow::addPriceLevel);
+    auto* clearLevelsAction = toolbar->addAction(tr("Clear levels"));
+    connect(
+        clearLevelsAction,
+        &QAction::triggered,
+        this,
+        &MainWindow::clearPriceLevels);
 
     toolbar->addSeparator();
     sourceLabel_ = new QLabel(tr("Loading…"), toolbar);
@@ -419,13 +595,20 @@ void MainWindow::buildUi() {
     buildIndicatorDock();
     buildDataStatusDock();
     buildResearchDock();
+    buildFundamentalDock();
     buildMarginRiskDock();
+    buildPortfolioDock();
     buildStrategyLabDock();
     statusBar()->showMessage(tr("Starting local chart renderer…"));
     if (!historyAvailable) {
         statusBar()->showMessage(
             tr("Historical cache is unavailable: %1")
                 .arg(historyStore_->lastError()),
+            15'000);
+    } else if (!fundamentalAvailable) {
+        statusBar()->showMessage(
+            tr("Fundamental cache is unavailable: %1")
+                .arg(fundamentalStore_->lastError()),
             15'000);
     }
 }
@@ -764,6 +947,9 @@ void MainWindow::buildDataStatusDock() {
     dataRetrievedLabel_ = new QLabel(QStringLiteral("—"), panel);
     dataMarketLabel_ = new QLabel(QStringLiteral("—"), panel);
     dataBarCountLabel_ = new QLabel(QStringLiteral("0"), panel);
+    dataPriceBasisLabel_ = new QLabel(QStringLiteral("Raw"), panel);
+    dataQualityLabel_ = new QLabel(QStringLiteral("—"), panel);
+    dataQualityLabel_->setWordWrap(true);
     dataDetailLabel_ = new QLabel(QStringLiteral("—"), panel);
     dataDetailLabel_->setWordWrap(true);
     layout->addRow(tr("State"), dataLifecycleLabel_);
@@ -772,6 +958,8 @@ void MainWindow::buildDataStatusDock() {
     layout->addRow(tr("Retrieved"), dataRetrievedLabel_);
     layout->addRow(tr("Market"), dataMarketLabel_);
     layout->addRow(tr("Bars"), dataBarCountLabel_);
+    layout->addRow(tr("Price basis"), dataPriceBasisLabel_);
+    layout->addRow(tr("Quality"), dataQualityLabel_);
     layout->addRow(tr("Detail"), dataDetailLabel_);
 
     dock->setWidget(panel);
@@ -837,6 +1025,32 @@ void MainWindow::buildResearchDock() {
         &QPushButton::clicked,
         this,
         &MainWindow::refreshResearchFromProvider);
+    secRefreshButton_ =
+        new QPushButton(tr("Refresh SEC EDGAR filings"), summaryPanel);
+    secRefreshButton_->setObjectName(QStringLiteral("secRefreshButton"));
+    secRefreshButton_->setEnabled(onlineDataEnabled_);
+    secRefreshButton_->setToolTip(
+        tr("Uses the official SEC submissions API. SEC_USER_AGENT must "
+           "identify this application with a contact email."));
+    summaryLayout->addRow(secRefreshButton_);
+    connect(
+        secRefreshButton_,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::refreshSecFilings);
+    fredRefreshButton_ =
+        new QPushButton(tr("Refresh FRED macro calendar"), summaryPanel);
+    fredRefreshButton_->setObjectName(QStringLiteral("fredRefreshButton"));
+    fredRefreshButton_->setEnabled(onlineDataEnabled_);
+    fredRefreshButton_->setToolTip(
+        tr("Uses FRED_API_KEY to retrieve the next 90 days of major "
+           "source-published economic release dates."));
+    summaryLayout->addRow(fredRefreshButton_);
+    connect(
+        fredRefreshButton_,
+        &QPushButton::clicked,
+        this,
+        &MainWindow::refreshFredCalendar);
     tabs->addTab(summaryPanel, tr("Summary"));
 
     auto* targetPanel = new QWidget(tabs);
@@ -937,6 +1151,42 @@ void MainWindow::buildResearchDock() {
             findChild<QDockWidget*>(QStringLiteral("analysisDock"))) {
         tabifyDockWidget(analysisDock, dock);
     }
+}
+
+void MainWindow::buildFundamentalDock() {
+    auto* dock = new QDockWidget(tr("Fundamental Lab"), this);
+    dock->setObjectName(QStringLiteral("fundamentalDock"));
+    dock->setAllowedAreas(
+        Qt::BottomDockWidgetArea |
+        Qt::LeftDockWidgetArea |
+        Qt::RightDockWidgetArea);
+    fundamentalWidget_ = new FundamentalWorkbenchWidget(
+        fundamentalStore_.get(),
+        historyStore_.get(),
+        onlineDataEnabled_,
+        dock);
+    fundamentalWidget_->setObjectName(
+        QStringLiteral("fundamentalWidget"));
+    dock->setWidget(fundamentalWidget_);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    connect(
+        fundamentalWidget_,
+        &FundamentalWorkbenchWidget::statusMessage,
+        this,
+        [this](const QString& message) {
+            statusBar()->showMessage(message, 15'000);
+        });
+    connect(
+        fundamentalWidget_,
+        &FundamentalWorkbenchWidget::settingsChanged,
+        this,
+        &MainWindow::saveSettingsNow);
+    if (auto* researchDock =
+            findChild<QDockWidget*>(
+                QStringLiteral("researchDock"))) {
+        tabifyDockWidget(researchDock, dock);
+    }
+    refreshFundamentalUniverse();
 }
 
 void MainWindow::buildMarginRiskDock() {
@@ -1042,6 +1292,35 @@ void MainWindow::buildMarginRiskDock() {
     }
 }
 
+void MainWindow::buildPortfolioDock() {
+    auto* dock = new QDockWidget(tr("Portfolio & paper ledger"), this);
+    dock->setObjectName(QStringLiteral("portfolioDock"));
+    dock->setAllowedAreas(
+        Qt::BottomDockWidgetArea |
+        Qt::LeftDockWidgetArea |
+        Qt::RightDockWidgetArea);
+    portfolioWidget_ = new PortfolioWidget(historyStore_.get(), dock);
+    portfolioWidget_->setObjectName(QStringLiteral("portfolioWidget"));
+    dock->setWidget(portfolioWidget_);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    connect(
+        portfolioWidget_,
+        &PortfolioWidget::statusMessage,
+        this,
+        [this](const QString& message) {
+            statusBar()->showMessage(message, 12'000);
+        });
+    connect(
+        portfolioWidget_,
+        &PortfolioWidget::portfolioChanged,
+        this,
+        &MainWindow::saveSettingsNow);
+    if (auto* researchDock =
+            findChild<QDockWidget*>(QStringLiteral("researchDock"))) {
+        tabifyDockWidget(researchDock, dock);
+    }
+}
+
 void MainWindow::buildStrategyLabDock() {
     auto* dock = new QDockWidget(tr("Strategy Lab"), this);
     dock->setObjectName(QStringLiteral("strategyLabDock"));
@@ -1071,6 +1350,18 @@ void MainWindow::buildStrategyLabDock() {
         [this](const QString& message) {
             statusBar()->showMessage(message, 12'000);
         });
+    connect(
+        strategyLab_,
+        &StrategyLabWidget::workspaceChanged,
+        this,
+        &MainWindow::saveSettingsNow);
+    if (fundamentalWidget_) {
+        connect(
+            fundamentalWidget_,
+            &FundamentalWorkbenchWidget::alertTriggered,
+            strategyLab_,
+            &StrategyLabWidget::recordExternalAlert);
+    }
     connect(
         dock,
         &QDockWidget::visibilityChanged,
@@ -1131,6 +1422,17 @@ void MainWindow::restoreSettings() {
         index >= 0) {
         timeframeSelector_->setCurrentIndex(index);
     }
+    const auto priceBasisValue =
+        settings
+            .value(
+                QStringLiteral("chart/priceAdjustmentMode"),
+                static_cast<int>(PriceAdjustmentMode::Raw))
+            .toInt();
+    if (const auto index =
+            priceBasisSelector_->findData(priceBasisValue);
+        index >= 0) {
+        priceBasisSelector_->setCurrentIndex(index);
+    }
 
     const auto style = settings.value(
                                    QStringLiteral("chart/style"),
@@ -1145,6 +1447,46 @@ void MainWindow::restoreSettings() {
                            .toString();
     if (const auto index = scaleSelector_->findData(scale); index >= 0) {
         scaleSelector_->setCurrentIndex(index);
+    }
+    comparisonSymbolInput_->setText(
+        normalizeWatchlistSymbol(
+            settings.value(
+                        QStringLiteral("chart/comparisonSymbol"),
+                        QStringLiteral("SPY"))
+                .toString()));
+    const auto layout = settings.value(
+                                    QStringLiteral("chart/layout"),
+                                    QStringLiteral("single"))
+                            .toString();
+    if (const auto index = chartLayoutSelector_->findData(layout);
+        index >= 0) {
+        chartLayoutSelector_->setCurrentIndex(index);
+    } else {
+        chartLayoutSelector_->setCurrentIndex(0);
+    }
+
+    priceLevels_.clear();
+    const auto levelsDocument = QJsonDocument::fromJson(
+        settings.value(QStringLiteral("chart/priceLevels")).toByteArray());
+    if (levelsDocument.isArray() && levelsDocument.array().size() <= 32) {
+        for (const auto& value : levelsDocument.array()) {
+            const auto object = value.toObject();
+            priceLevels_.push_back({
+                .id = object.value(QStringLiteral("id")).toString(),
+                .symbol =
+                    object.value(QStringLiteral("symbol")).toString(),
+                .price = object.value(QStringLiteral("price")).toDouble(),
+                .title = object.value(QStringLiteral("title")).toString(),
+                .color = object.value(QStringLiteral("color")).toString(),
+            });
+        }
+        if (!chartView_->bridge()->setPriceLevels(priceLevels_)) {
+            priceLevels_.clear();
+            static_cast<void>(chartView_->bridge()->setPriceLevels({}));
+            statusBar()->showMessage(
+                tr("Saved chart levels were invalid and were not loaded."),
+                12'000);
+        }
     }
     restoreIndicatorSettings(settings);
     marginLongValueInput_->setValue(
@@ -1168,8 +1510,18 @@ void MainWindow::restoreSettings() {
     chartView_->bridge()->setChartStyle(styleSelector_->currentData().toString());
     chartView_->bridge()->setPriceScaleMode(
         scaleSelector_->currentData().toString());
+    comparisonChartView_->bridge()->setChartStyle(
+        styleSelector_->currentData().toString());
+    comparisonChartView_->bridge()->setPriceScaleMode(
+        scaleSelector_->currentData().toString());
     if (strategyLab_) {
         strategyLab_->restoreSettings(settings);
+    }
+    if (portfolioWidget_) {
+        portfolioWidget_->restoreSettings(settings);
+    }
+    if (fundamentalWidget_) {
+        fundamentalWidget_->restoreSettings(settings);
     }
 }
 
@@ -1243,20 +1595,46 @@ void MainWindow::saveSettings() const {
         QStringLiteral("chart/timeframe"),
         timeframeSelector_->currentData().toInt());
     settings.setValue(
+        QStringLiteral("chart/priceAdjustmentMode"),
+        priceBasisSelector_->currentData().toInt());
+    settings.setValue(
         QStringLiteral("chart/style"),
         styleSelector_->currentData().toString());
     settings.setValue(
         QStringLiteral("chart/priceScale"),
         scaleSelector_->currentData().toString());
     settings.setValue(
+        QStringLiteral("chart/layout"),
+        chartLayoutSelector_->currentData().toString());
+    settings.setValue(
+        QStringLiteral("chart/comparisonSymbol"),
+        normalizeWatchlistSymbol(comparisonSymbolInput_->text()));
+    settings.setValue(
         QStringLiteral("chart/darkTheme"),
         darkThemeAction_->isChecked());
+    QJsonArray priceLevels;
+    for (const auto& level : priceLevels_) {
+        priceLevels.append(QJsonObject{
+            {QStringLiteral("id"), level.id},
+            {QStringLiteral("symbol"), level.symbol},
+            {QStringLiteral("price"), level.price},
+            {QStringLiteral("title"), level.title},
+            {QStringLiteral("color"), level.color},
+        });
+    }
+    settings.setValue(
+        QStringLiteral("chart/priceLevels"),
+        QJsonDocument(priceLevels).toJson(QJsonDocument::Compact));
     settings.setValue(
         QStringLiteral("watchlists/json"),
         serializeWatchlists(watchlists_));
-    settings.setValue(
-        QStringLiteral("research/workspace"),
-        serializeResearchWorkspace(researchWorkspace_));
+    const auto serializedResearch =
+        serializeResearchWorkspace(researchWorkspace_);
+    if (!serializedResearch.isEmpty()) {
+        settings.setValue(
+            QStringLiteral("research/workspace"),
+            serializedResearch);
+    }
     settings.setValue(
         QStringLiteral("margin/longMarketValue"),
         marginLongValueInput_->value());
@@ -1307,6 +1685,12 @@ void MainWindow::saveSettings() const {
     if (strategyLab_) {
         strategyLab_->saveSettings(settings);
     }
+    if (portfolioWidget_) {
+        portfolioWidget_->saveSettings(settings);
+    }
+    if (fundamentalWidget_) {
+        fundamentalWidget_->saveSettings(settings);
+    }
 }
 
 void MainWindow::saveSettingsNow() const {
@@ -1347,6 +1731,7 @@ void MainWindow::loadMarketData() {
     marketDataClient_->fetch(
         symbol,
         timeframe,
+        activeAdjustmentMode(),
         [this, symbol, timeframe, timeframeText](MarketDataResult result) mutable {
             if (symbol != activeSymbol() || timeframe != activeTimeframe()) {
                 return;
@@ -1365,7 +1750,8 @@ void MainWindow::loadMarketData() {
                         tr("Ready"),
                         source == QStringLiteral("Yahoo Finance")
                             ? tr("Unofficial Yahoo Finance chart endpoint.")
-                            : tr("Twelve Data fallback response."))) {
+                            : tr("Twelve Data fallback response."),
+                        std::move(result.rawBars))) {
                     setStatus(source, barCount, symbol, timeframeText);
                 }
             } else {
@@ -1404,6 +1790,12 @@ void MainWindow::showDemo(
         .instrumentType = tr("Demo series"),
         .interval = activeTimeframeLabel(),
         .retrievedAtUtc = now,
+        .requestedAdjustmentMode = activeAdjustmentMode(),
+        .appliedAdjustmentMode = PriceAdjustmentMode::Raw,
+        .adjustmentWarning =
+            activeAdjustmentMode() == PriceAdjustmentMode::Raw
+                ? QString{}
+                : tr("Synthetic demo data has no corporate-action adjustment."),
     };
     if (applySeries(
             symbol,
@@ -1432,7 +1824,17 @@ bool MainWindow::applySeries(
     Bars bars,
     MarketDataMetadata metadata,
     const QString& lifecycle,
-    const QString& detail) {
+    const QString& detail,
+    Bars rawCacheBars) {
+    if (metadata.quality.acceptedRows == 0 && !bars.empty()) {
+        metadata.quality = analyzeMarketDataQuality(
+            bars,
+            activeTimeframe(),
+            bars.size(),
+            0,
+            0,
+            {});
+    }
     if (!chartView_->bridge()->setSeries(
             symbol,
             timeframe,
@@ -1450,11 +1852,357 @@ bool MainWindow::applySeries(
             activeTimeframe(),
             source,
             currentBars_,
-            metadata);
+            metadata,
+            std::move(rawCacheBars));
+    }
+    if (portfolioWidget_ && !currentBars_.empty() &&
+        metadata.deliveryMode != DataDeliveryMode::Synthetic) {
+        portfolioWidget_->setCurrentQuote(
+            currentSeriesSymbol_,
+            currentBars_.back().close,
+            currentBars_.back().timestamp,
+            metadata.currency);
+    }
+    if (fundamentalWidget_) {
+        fundamentalWidget_->setCurrentContext(
+            currentSeriesSymbol_,
+            currentBars_);
     }
     refreshResearchDisplay();
     recalculateMarginRisk();
+    refreshComparisonAnalysis();
     return true;
+}
+
+void MainWindow::setChartLayout(const QString& layout) {
+    const auto comparisonVisible = layout != QStringLiteral("single");
+    chartSplitter_->setOrientation(
+        layout == QStringLiteral("vertical")
+            ? Qt::Vertical
+            : Qt::Horizontal);
+    comparisonChartView_->setVisible(comparisonVisible);
+    chartSplitter_->setStretchFactor(0, 1);
+    chartSplitter_->setStretchFactor(1, 1);
+    if (!comparisonVisible) {
+        comparisonStatusLabel_->setText(tr("Comparison off"));
+        return;
+    }
+    comparisonStatusLabel_->setText(
+        comparisonBars_.empty()
+            ? tr("Enter a benchmark and load comparison")
+            : tr("Updating comparison…"));
+    refreshComparisonAnalysis();
+}
+
+void MainWindow::loadComparisonData() {
+    auto symbol =
+        normalizeWatchlistSymbol(comparisonSymbolInput_->text());
+    const NamedWatchlist candidate{
+        .id = QStringLiteral("comparison-validation"),
+        .name = QStringLiteral("Comparison"),
+        .entries = {{.symbol = symbol}},
+    };
+    if (!validateWatchlist(candidate).isEmpty()) {
+        comparisonStatusLabel_->setText(tr("Invalid comparison symbol"));
+        statusBar()->showMessage(
+            tr("Enter a valid comparison symbol (for example SPY or QQQ)."),
+            10'000);
+        return;
+    }
+    if (symbol == activeSymbol()) {
+        comparisonStatusLabel_->setText(tr("Choose a different symbol"));
+        statusBar()->showMessage(
+            tr("The comparison symbol must differ from the primary symbol."),
+            10'000);
+        return;
+    }
+    comparisonSymbolInput_->setText(symbol);
+    if (!comparisonChartView_->isVisible()) {
+        const QSignalBlocker blocker(chartLayoutSelector_);
+        const auto index =
+            chartLayoutSelector_->findData(QStringLiteral("horizontal"));
+        chartLayoutSelector_->setCurrentIndex(index);
+        setChartLayout(QStringLiteral("horizontal"));
+    }
+    const auto timeframe = activeTimeframe();
+    const auto timeframeText = activeTimeframeLabel();
+    comparisonStatusLabel_->setText(
+        tr("%1 · %2 · loading…").arg(symbol, timeframeText));
+
+    if (!onlineDataEnabled_) {
+        const auto now = QDateTime::currentSecsSinceEpoch();
+        auto bars = DemoDataSource::generate(
+            symbol.toStdString(),
+            timeframe,
+            600,
+            now);
+        applyComparisonSeries(
+            symbol,
+            tr("Synthetic comparison"),
+            std::move(bars),
+            {
+                .deliveryMode = DataDeliveryMode::Synthetic,
+                .exchange = tr("Synthetic"),
+                .timezone = QStringLiteral("UTC"),
+                .instrumentType = tr("Demo series"),
+                .interval = timeframeText,
+                .retrievedAtUtc = now,
+                .requestedAdjustmentMode = activeAdjustmentMode(),
+                .appliedAdjustmentMode = PriceAdjustmentMode::Raw,
+                .adjustmentWarning =
+                    activeAdjustmentMode() == PriceAdjustmentMode::Raw
+                        ? QString{}
+                        : tr("Synthetic comparison data has no adjustment basis."),
+            });
+        saveSettingsNow();
+        return;
+    }
+
+    comparisonDataClient_->fetch(
+        symbol,
+        timeframe,
+        activeAdjustmentMode(),
+        [this, symbol, timeframe](MarketDataResult result) mutable {
+            if (symbol !=
+                    normalizeWatchlistSymbol(
+                        comparisonSymbolInput_->text()) ||
+                timeframe != activeTimeframe()) {
+                return;
+            }
+            if (!result.ok()) {
+                comparisonBars_.clear();
+                comparisonSeriesSymbol_.clear();
+                comparisonStatusLabel_->setText(
+                    tr("%1 unavailable").arg(symbol));
+                statusBar()->showMessage(
+                    tr("Comparison data failed: %1").arg(result.error),
+                    15'000);
+                return;
+            }
+            applyComparisonSeries(
+                symbol,
+                result.source,
+                std::move(result.bars),
+                result.metadata);
+            saveSettingsNow();
+        });
+}
+
+void MainWindow::applyComparisonSeries(
+    const QString& symbol,
+    const QString& source,
+    Bars bars,
+    const MarketDataMetadata& metadata) {
+    if (!comparisonChartView_->bridge()->setSeries(
+            symbol,
+            activeTimeframeLabel(),
+            source,
+            bars)) {
+        comparisonStatusLabel_->setText(tr("Comparison series is invalid"));
+        return;
+    }
+    comparisonSeriesSymbol_ = normalizeWatchlistSymbol(symbol);
+    comparisonBars_ = std::move(bars);
+    comparisonMetadata_ = metadata;
+    comparisonChartView_->bridge()->setIndicators({});
+    comparisonChartView_->bridge()->setResearchEvents({});
+    refreshComparisonAnalysis();
+}
+
+void MainWindow::refreshComparisonAnalysis() {
+    if (!comparisonChartView_ || !comparisonChartView_->isVisible()) {
+        return;
+    }
+    if (currentBars_.empty() || comparisonBars_.empty()) {
+        comparisonStatusLabel_->setText(tr("Waiting for both series"));
+        return;
+    }
+    if (currentSeriesSymbol_.compare(
+            comparisonSeriesSymbol_,
+            Qt::CaseInsensitive) == 0) {
+        comparisonStatusLabel_->setText(tr("Choose a different comparison symbol"));
+        comparisonStatusLabel_->setToolTip(
+            tr("Primary and comparison symbols are the same."));
+        return;
+    }
+    const auto primaryCount = completedBarCount(
+        currentBars_,
+        activeTimeframe(),
+        dataStatus_.metadata.retrievedAtUtc > 0
+            ? dataStatus_.metadata.retrievedAtUtc
+            : QDateTime::currentSecsSinceEpoch());
+    const auto comparisonCount = completedBarCount(
+        comparisonBars_,
+        activeTimeframe(),
+        comparisonMetadata_.retrievedAtUtc > 0
+            ? comparisonMetadata_.retrievedAtUtc
+            : QDateTime::currentSecsSinceEpoch());
+    const Bars primary(
+        currentBars_.begin(),
+        currentBars_.begin() + static_cast<std::ptrdiff_t>(primaryCount));
+    const Bars comparison(
+        comparisonBars_.begin(),
+        comparisonBars_.begin() +
+            static_cast<std::ptrdiff_t>(comparisonCount));
+    const auto result = compareSeries(primary, comparison);
+    if (!result.ok()) {
+        comparisonStatusLabel_->setText(tr("Comparison unavailable"));
+        comparisonStatusLabel_->setToolTip(result.error);
+        return;
+    }
+    const auto signedPercent = [](const double value) {
+        return QStringLiteral("%1%2%")
+            .arg(value >= 0.0 ? QStringLiteral("+") : QString{})
+            .arg(QLocale::system().toString(value, 'f', 2));
+    };
+    const auto correlation =
+        result.returnCorrelation
+            ? QLocale::system().toString(*result.returnCorrelation, 'f', 2)
+            : QStringLiteral("—");
+    comparisonStatusLabel_->setText(
+        tr("%1 · %2 common · relative %3 · ρ %4")
+            .arg(comparisonSeriesSymbol_)
+            .arg(result.points.size())
+            .arg(signedPercent(result.relativeReturnPercent))
+            .arg(correlation));
+    comparisonStatusLabel_->setToolTip(
+        tr("%1 return %2 · %3 return %4 · exact timestamp alignment; "
+           "correlation uses close-to-close log returns.")
+            .arg(
+                currentSeriesSymbol_,
+                signedPercent(result.primaryReturnPercent),
+                comparisonSeriesSymbol_,
+                signedPercent(result.comparisonReturnPercent)));
+}
+
+void MainWindow::addPriceLevel() {
+    if (currentBars_.empty()) {
+        statusBar()->showMessage(
+            tr("Load a chart before adding a price level."),
+            8'000);
+        return;
+    }
+    if (priceLevels_.size() >= 32) {
+        statusBar()->showMessage(
+            tr("The chart already has the maximum of 32 price levels."),
+            10'000);
+        return;
+    }
+    auto accepted = false;
+    const auto price = QInputDialog::getDouble(
+        this,
+        tr("Add price level"),
+        tr("Price"),
+        currentBars_.back().close,
+        0.000001,
+        1'000'000'000'000.0,
+        6,
+        &accepted);
+    if (!accepted) {
+        return;
+    }
+    auto label = QInputDialog::getText(
+                     this,
+                     tr("Add price level"),
+                     tr("Label"),
+                     QLineEdit::Normal,
+                     tr("Level %1").arg(formatPrice(price)),
+                     &accepted)
+                     .trimmed();
+    if (!accepted) {
+        return;
+    }
+    if (label.isEmpty() || label.size() > 80) {
+        statusBar()->showMessage(
+            tr("A level label must contain 1–80 characters."),
+            10'000);
+        return;
+    }
+    const QStringList choices{
+        tr("Visual level only"),
+        tr("Alert when close crosses above"),
+        tr("Alert when close crosses below"),
+    };
+    const auto choice = QInputDialog::getItem(
+        this,
+        tr("Level behavior"),
+        tr("Action"),
+        choices,
+        0,
+        false,
+        &accepted);
+    if (!accepted) {
+        return;
+    }
+    const auto alertRequested = choice != choices.front();
+    const auto crossesAbove = choice == choices.at(1);
+    const ChartPriceLevel level{
+        .id = QUuid::createUuid().toString(QUuid::WithoutBraces),
+        .symbol = activeSymbol(),
+        .price = price,
+        .title = label,
+        .color =
+            !alertRequested
+                ? QStringLiteral("#2962ff")
+                : (crossesAbove
+                       ? QStringLiteral("#26a69a")
+                       : QStringLiteral("#ef5350")),
+    };
+    priceLevels_.push_back(level);
+    if (!chartView_->bridge()->setPriceLevels(priceLevels_)) {
+        priceLevels_.pop_back();
+        return;
+    }
+    if (alertRequested &&
+        (!strategyLab_ ||
+         !strategyLab_->addPriceLevelAlert(
+             activeSymbol(),
+             price,
+             crossesAbove,
+             label))) {
+        priceLevels_.pop_back();
+        static_cast<void>(
+            chartView_->bridge()->setPriceLevels(priceLevels_));
+        return;
+    }
+    saveSettingsNow();
+    statusBar()->showMessage(
+        alertRequested
+            ? tr("Added level and a local crossing alert.")
+            : tr("Added visual price level."),
+        8'000);
+}
+
+void MainWindow::clearPriceLevels() {
+    const auto symbol = activeSymbol();
+    const auto first = std::ranges::find_if(
+        priceLevels_,
+        [&](const ChartPriceLevel& level) {
+            return level.symbol.compare(symbol, Qt::CaseInsensitive) == 0;
+        });
+    if (first == priceLevels_.end()) {
+        statusBar()->showMessage(tr("There are no price levels to clear."), 5'000);
+        return;
+    }
+    if (QMessageBox::question(
+            this,
+            tr("Clear price levels"),
+            tr("Remove all visual price levels for %1? Saved alerts are kept.")
+                .arg(symbol)) !=
+        QMessageBox::Yes) {
+        return;
+    }
+    std::erase_if(
+        priceLevels_,
+        [&](const ChartPriceLevel& level) {
+            return level.symbol.compare(symbol, Qt::CaseInsensitive) == 0;
+        });
+    static_cast<void>(
+        chartView_->bridge()->setPriceLevels(priceLevels_));
+    saveSettingsNow();
+    statusBar()->showMessage(
+        tr("Cleared visual price levels; alert rules were not deleted."),
+        8'000);
 }
 
 void MainWindow::showReplaySeries(Bars bars) {
@@ -1689,6 +2437,13 @@ void MainWindow::openCsv() {
         .instrumentType = tr("Imported OHLCV"),
         .interval = tr("CSV"),
         .retrievedAtUtc = QDateTime::currentSecsSinceEpoch(),
+        .requestedAdjustmentMode = activeAdjustmentMode(),
+        .appliedAdjustmentMode = PriceAdjustmentMode::Raw,
+        .adjustmentWarning =
+            activeAdjustmentMode() == PriceAdjustmentMode::Raw
+                ? QString{}
+                : tr("CSV files are treated as raw unless their producer "
+                     "documents an adjusted basis."),
     };
     if (applySeries(
             symbol,
@@ -1761,6 +2516,7 @@ void MainWindow::refreshWatchlistEntries(const QString& preferredSymbol) {
     if (!list) {
         watchlistNoteInput_->clear();
         refreshStrategyWatchlist();
+        refreshFundamentalUniverse();
         refreshResearchDisplay();
         recalculateMarginRisk();
         return;
@@ -1793,6 +2549,7 @@ void MainWindow::refreshWatchlistEntries(const QString& preferredSymbol) {
     watchlistNoteInput_->setText(
         entryIndex ? list->entries[*entryIndex].note : QString{});
     refreshStrategyWatchlist();
+    refreshFundamentalUniverse();
     refreshResearchDisplay();
     recalculateMarginRisk();
 }
@@ -1809,6 +2566,25 @@ void MainWindow::refreshStrategyWatchlist() {
         }
     }
     strategyLab_->setWatchlistSymbols(std::move(symbols));
+}
+
+void MainWindow::refreshFundamentalUniverse() {
+    if (!fundamentalWidget_) {
+        return;
+    }
+    QStringList symbols;
+    for (const auto& list : watchlists_.lists) {
+        for (const auto& entry : list.entries) {
+            const auto symbol =
+                normalizeWatchlistSymbol(entry.symbol);
+            if (!symbol.isEmpty()) {
+                symbols.push_back(symbol);
+            }
+        }
+    }
+    symbols.removeDuplicates();
+    fundamentalWidget_->setUniverseSymbols(
+        std::move(symbols));
 }
 
 void MainWindow::selectNamedWatchlist(const int index) {
@@ -2104,6 +2880,80 @@ void MainWindow::refreshResearchFromProvider() {
         });
 }
 
+void MainWindow::refreshSecFilings() {
+    if (!onlineDataEnabled_ || !eventIntelligenceClient_ ||
+        !secRefreshButton_ || !fredRefreshButton_) {
+        return;
+    }
+    const auto symbol = activeSymbol();
+    QString cik;
+    std::int64_t newestSnapshot{};
+    for (const auto& snapshot : researchWorkspace_.companySnapshots) {
+        if (normalizeWatchlistSymbol(snapshot.symbol) == symbol &&
+            snapshot.asOfUtc > newestSnapshot && !snapshot.cik.isEmpty()) {
+            cik = snapshot.cik;
+            newestSnapshot = snapshot.asOfUtc;
+        }
+    }
+    secRefreshButton_->setEnabled(false);
+    fredRefreshButton_->setEnabled(false);
+    secRefreshButton_->setText(tr("Refreshing %1 filings…").arg(symbol));
+    eventIntelligenceClient_->fetchSecFilings(
+        symbol,
+        cik,
+        [this, symbol](EventIntelligenceResult result) mutable {
+            if (secRefreshButton_) {
+                secRefreshButton_->setText(tr("Refresh SEC EDGAR filings"));
+                secRefreshButton_->setEnabled(onlineDataEnabled_);
+            }
+            if (fredRefreshButton_) {
+                fredRefreshButton_->setEnabled(onlineDataEnabled_);
+            }
+            if (symbol != activeSymbol()) {
+                return;
+            }
+            if (!result.ok()) {
+                statusBar()->showMessage(result.error, 15'000);
+                QMessageBox::warning(
+                    this,
+                    tr("SEC refresh failed"),
+                    result.error);
+                return;
+            }
+            mergeEventIntelligenceResult(std::move(result));
+        });
+}
+
+void MainWindow::refreshFredCalendar() {
+    if (!onlineDataEnabled_ || !eventIntelligenceClient_ ||
+        !secRefreshButton_ || !fredRefreshButton_) {
+        return;
+    }
+    secRefreshButton_->setEnabled(false);
+    fredRefreshButton_->setEnabled(false);
+    fredRefreshButton_->setText(tr("Refreshing FRED calendar…"));
+    eventIntelligenceClient_->fetchFredCalendar(
+        [this](EventIntelligenceResult result) mutable {
+            if (secRefreshButton_) {
+                secRefreshButton_->setEnabled(onlineDataEnabled_);
+            }
+            if (fredRefreshButton_) {
+                fredRefreshButton_->setText(
+                    tr("Refresh FRED macro calendar"));
+                fredRefreshButton_->setEnabled(onlineDataEnabled_);
+            }
+            if (!result.ok()) {
+                statusBar()->showMessage(result.error, 15'000);
+                QMessageBox::warning(
+                    this,
+                    tr("FRED refresh failed"),
+                    result.error);
+                return;
+            }
+            mergeEventIntelligenceResult(std::move(result));
+        });
+}
+
 void MainWindow::mergeResearchResult(AlphaVantageResearchResult result) {
     const auto symbol = normalizeWatchlistSymbol(result.snapshot.symbol);
     const auto provider = result.snapshot.provider;
@@ -2158,6 +3008,58 @@ void MainWindow::mergeResearchResult(AlphaVantageResearchResult result) {
                              : tr("%1 overview refreshed; calendar warning: %2")
                                    .arg(symbol, result.warning);
     statusBar()->showMessage(message, 15'000);
+}
+
+void MainWindow::mergeEventIntelligenceResult(
+    EventIntelligenceResult result) {
+    const auto provider = result.provider.trimmed();
+    const auto symbol = normalizeWatchlistSymbol(result.symbol);
+    const auto secProvider =
+        provider.compare(QStringLiteral("SEC EDGAR"), Qt::CaseInsensitive) == 0;
+    const auto fredProvider =
+        provider.compare(QStringLiteral("FRED"), Qt::CaseInsensitive) == 0;
+    if ((!secProvider && !fredProvider) ||
+        (secProvider && symbol.isEmpty())) {
+        statusBar()->showMessage(
+            tr("Event provider returned invalid provenance."),
+            15'000);
+        return;
+    }
+    std::erase_if(
+        result.events,
+        [&](const ResearchEvent& event) {
+            const auto eventSymbol = normalizeWatchlistSymbol(event.symbol);
+            return !validateResearchEvent(event).isEmpty() ||
+                   event.source.compare(provider, Qt::CaseInsensitive) != 0 ||
+                   (secProvider && eventSymbol != symbol) ||
+                   (fredProvider && !eventSymbol.isEmpty());
+        });
+    std::erase_if(
+        researchWorkspace_.events,
+        [&](const ResearchEvent& event) {
+            if (event.source.compare(provider, Qt::CaseInsensitive) != 0) {
+                return false;
+            }
+            return fredProvider ||
+                   normalizeWatchlistSymbol(event.symbol) == symbol;
+        });
+    const auto capacity =
+        ResearchWorkspace::maximumEvents - researchWorkspace_.events.size();
+    if (result.events.size() > capacity) {
+        result.events.resize(capacity);
+    }
+    const auto added = result.events.size();
+    researchWorkspace_.events.insert(
+        researchWorkspace_.events.end(),
+        std::make_move_iterator(result.events.begin()),
+        std::make_move_iterator(result.events.end()));
+    refreshResearchDisplay();
+    saveSettingsNow();
+    statusBar()->showMessage(
+        tr("%1 event intelligence refreshed · %2 records.")
+            .arg(provider)
+            .arg(added),
+        15'000);
 }
 
 void MainWindow::refreshResearchDisplay() {
@@ -2374,8 +3276,25 @@ void MainWindow::refreshResearchDisplay() {
                   .arg(
                       (*next)->scheduledDate.toString(Qt::ISODate),
                       researchEventTypeLabel((*next)->type),
-                      (*next)->title,
-                      confidenceLabel((*next)->confidence)));
+                       (*next)->title,
+                       confidenceLabel((*next)->confidence)));
+    std::vector<ResearchEvent> chartEvents;
+    chartEvents.reserve(visibleEvents.size());
+    for (const auto* event : visibleEvents) {
+        chartEvents.push_back(*event);
+    }
+    if (chartView_) {
+        chartView_->bridge()->setResearchEvents(std::move(chartEvents));
+    }
+    if (portfolioWidget_) {
+        portfolioWidget_->setResearchEvents(researchWorkspace_.events);
+    }
+    if (strategyLab_) {
+        strategyLab_->setResearchEvents(researchWorkspace_.events);
+    }
+    if (fundamentalWidget_) {
+        fundamentalWidget_->setResearchWorkspace(researchWorkspace_);
+    }
 }
 
 void MainWindow::addTargetEstimate() {
@@ -2809,6 +3728,8 @@ void MainWindow::showLoadingDataStatus(
         .metadata = {
             .deliveryMode = DataDeliveryMode::Polled,
             .interval = timeframe,
+            .requestedAdjustmentMode = activeAdjustmentMode(),
+            .appliedAdjustmentMode = PriceAdjustmentMode::Raw,
         },
     };
     dataMarketLabel_->setText(symbol);
@@ -2885,10 +3806,47 @@ void MainWindow::refreshDataStatusDisplay() {
     dataBarCountLabel_->setText(
         QLocale::system().toString(
             static_cast<qulonglong>(dataStatus_.barCount)));
+    const auto requestedBasis = priceAdjustmentModeLabel(
+        dataStatus_.metadata.requestedAdjustmentMode);
+    const auto appliedBasis = priceAdjustmentModeLabel(
+        dataStatus_.metadata.appliedAdjustmentMode);
+    dataPriceBasisLabel_->setText(
+        dataStatus_.metadata.requestedAdjustmentMode ==
+                dataStatus_.metadata.appliedAdjustmentMode
+            ? tr("%1 · %2 corporate action(s)")
+                  .arg(appliedBasis)
+                  .arg(static_cast<qulonglong>(
+                      dataStatus_.metadata.corporateActionCount))
+            : tr("Requested %1 · applied %2")
+                  .arg(requestedBasis, appliedBasis));
+    const auto& quality = dataStatus_.metadata.quality;
+    dataQualityLabel_->setText(
+        tr("%1 · accepted %2/%3 · rejected %4 · duplicates %5 · "
+           "gaps %6 · outliers %7")
+            .arg(dataQualityGradeLabel(quality.grade))
+            .arg(static_cast<qulonglong>(quality.acceptedRows))
+            .arg(static_cast<qulonglong>(quality.inputRows))
+            .arg(static_cast<qulonglong>(quality.rejectedRows))
+            .arg(static_cast<qulonglong>(quality.duplicateRows))
+            .arg(static_cast<qulonglong>(quality.suspiciousGaps))
+            .arg(static_cast<qulonglong>(quality.outlierBars)));
+    QString effectiveDetail = dataStatus_.detail;
+    if (!dataStatus_.metadata.adjustmentWarning.isEmpty()) {
+        if (!effectiveDetail.isEmpty()) {
+            effectiveDetail += QStringLiteral(" ");
+        }
+        effectiveDetail += dataStatus_.metadata.adjustmentWarning;
+    }
+    if (!quality.issues.empty()) {
+        if (!effectiveDetail.isEmpty()) {
+            effectiveDetail += QStringLiteral(" ");
+        }
+        effectiveDetail += quality.issues.front().detail;
+    }
     dataDetailLabel_->setText(
-        dataStatus_.detail.isEmpty()
+        effectiveDetail.isEmpty()
             ? tr("No provider detail.")
-            : dataStatus_.detail);
+            : effectiveDetail);
 
     const auto sourceSuffix =
         dataStatus_.metadata.deliveryMode == DataDeliveryMode::Polled
@@ -2905,6 +3863,7 @@ void MainWindow::refreshDataStatusDisplay() {
 
 void MainWindow::applyTheme(const bool dark) {
     chartView_->bridge()->setDarkTheme(dark);
+    comparisonChartView_->bridge()->setDarkTheme(dark);
     if (dark) {
         qApp->setStyleSheet(QStringLiteral(
             "QMainWindow, QDialog, QMenuBar, QMenu, QToolBar, QDockWidget, "
@@ -2937,7 +3896,7 @@ void MainWindow::showAbout() {
     dialog.setMinimumWidth(560);
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
-        tr("<h2>TradingView Chart 0.5.0</h2>"
+        tr("<h2>TradingView Chart 0.8.0</h2>"
            "<p>A C++/Qt market chart viewer with online and offline sources.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "
@@ -2956,8 +3915,21 @@ void MainWindow::showAbout() {
            "connection or prediction of a margin-call date.</p>"
            "<p>The local Strategy Lab reuses one rule definition for next-bar "
            "long-only backtests, deterministic replay, cached-watchlist scans, "
-           "and foreground-only alerts. Provider history is stored locally "
+           "and persistent foreground-only alerts. Provider history is stored locally "
            "with its provenance; synthetic demo bars are not cached.</p>"
+           "<p>Yahoo views can use raw, split-adjusted, or total-return prices "
+           "with requested/applied basis and quality shown explicitly. "
+           "Adjusted views never overwrite the raw history cache.</p>"
+           "<p>Strategy robustness reports use completed bars, no-lookahead "
+           "multi-timeframe alignment, deterministic resampling, and explicit "
+           "sample availability. They are diagnostics, not an optimizer.</p>"
+           "<p>The paper ledger uses long-only average-cost accounting and "
+           "marks valuation incomplete when a quote is missing. SEC/FRED "
+           "calendar imports, comparison statistics, and chart levels retain "
+           "explicit assumptions and do not provide broker execution.</p>"
+           "<p>Portfolio risk uses compatible cached daily history and fixed "
+           "current weights. Rebalance suggestions are non-executing and "
+           "time-weighted return is an approximate daily-close estimate.</p>"
            "<p>The crosshair values and calculations are descriptive, not "
            "forecasts or trading advice. Offline demo data is synthetic; "
            "imported CSV data and watchlist notes remain local.</p>"),
@@ -2989,6 +3961,18 @@ Timeframe MainWindow::activeTimeframe() const {
 
 QString MainWindow::activeTimeframeLabel() const {
     return timeframeLabel(activeTimeframe());
+}
+
+PriceAdjustmentMode MainWindow::activeAdjustmentMode() const noexcept {
+    if (!priceBasisSelector_) {
+        return PriceAdjustmentMode::Raw;
+    }
+    const auto value = priceBasisSelector_->currentData().toInt();
+    if (value < static_cast<int>(PriceAdjustmentMode::Raw) ||
+        value > static_cast<int>(PriceAdjustmentMode::TotalReturn)) {
+        return PriceAdjustmentMode::Raw;
+    }
+    return static_cast<PriceAdjustmentMode>(value);
 }
 
 void MainWindow::setStatus(

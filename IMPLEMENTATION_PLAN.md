@@ -4,7 +4,10 @@ Status: original offline MVP completed on 2026-07-24; reviewed online-provider
 extension implemented on 2026-07-25; data-intelligence workstation package
 implemented on 2026-07-26; Android package implemented and emulator-tested on
 2026-07-26; Phase 10 Strategy Lab, local history cache, and boundary hardening
-implemented and package-verified on 2026-07-26.
+implemented and package-verified on 2026-07-26; Phase 11 data integrity,
+strategy robustness, and portfolio-risk packages implemented on 2026-07-26;
+Phase 12 point-in-time fundamentals, screening, valuation, and event-impact
+packages implemented on 2026-07-26.
 
 ## 1. Goal and non-goals
 
@@ -24,7 +27,7 @@ providers when a network is available:
 
 Non-goals are real-money trading, scraping TradingView, unofficial TradingView
 data endpoints, app-store publication, broker connectivity, short selling,
-background/mobile alerts, multi-timeframe rule joins, and paper order
+background/mobile alerts, automatic parameter optimization, and paper order
 execution. Yahoo's chart endpoint is explicitly labeled as unofficial and is
 never presented as a TradingView data service.
 
@@ -68,6 +71,11 @@ Qt MainWindow
   │     ├── shared conditions / next-bar backtest
   │     ├── deterministic replay
   │     └── cached scanner / foreground alerts
+  ├── Fundamental Lab
+  │     ├── SEC CompanyFacts / point-in-time SQLite
+  │     ├── reported and derived series / scenario valuation
+  │     ├── local multi-factor screen / same-unit peers
+  │     └── event impact / opt-in foreground alerts
   ├── MarketDataClient
   │     ├── Yahoo Finance (primary)
   │     └── Twelve Data (optional fallback)
@@ -297,9 +305,41 @@ neutralization have automated coverage. The Windows package passes its isolated
 WebEngine smoke test, the Android release still builds and signs with the
 existing key, and the live Yahoo diagnostic remains valid.
 
-## 5. Follow-on roadmap
+### Phase 11 — professional validation and portfolio risk
 
-After the MVP is stable:
+Implement the reviewed
+[`PHASE_11_PROFESSIONAL_VALIDATION_PLAN.md`](PHASE_11_PROFESSIONAL_VALIDATION_PLAN.md):
+explicit raw/split/total-return price bases, parsed corporate actions, bounded
+data-quality diagnostics, no-lookahead multi-timeframe strategy conditions,
+walk-forward/Monte Carlo/parameter/regime/multi-symbol robustness reports, and
+history-aligned portfolio risk, money-weighted return, allocation targets, and
+non-executing rebalance suggestions.
+
+Gate: requested and applied price basis never diverge silently; adjusted bars
+cannot contaminate the raw history cache; robustness results expose sample
+sizes and unavailable states; portfolio risk exposes coverage and fixed-weight
+assumptions; schema-1 strategies and portfolios migrate without data loss; all
+desktop, web, Windows-package, and Android portability gates pass.
+
+### Phase 12 — point-in-time fundamentals and event impact
+
+Implement the reviewed
+[`PHASE_12_POINT_IN_TIME_FUNDAMENTAL_PLAN.md`](PHASE_12_POINT_IN_TIME_FUNDAMENTAL_PLAN.md):
+official SEC CompanyFacts acquisition, accession-level provenance, a separate
+SQLite fact cache, filing-date-bounded annual/quarterly/TTM reconstruction,
+transparent derived metrics, DCF/reverse-DCF scenarios, same-unit cached peer
+comparisons, a saved local fundamental/technical/event screen, and descriptive
+earnings/filing impact reports with optional foreground alerts.
+
+Gate: no future filing or price can enter a historical screen; cumulative
+quarters and restatements resolve deterministically; price-dependent values
+require an as-of raw daily close; peer values never mix units; a ticker/CIK
+change cannot mix issuer facts; all unavailable inputs stay explicit; and the
+native, renderer, Windows-package, and Android portability gates pass.
+
+## 5. Remaining follow-on roadmap
+
+After version 0.8 is stable:
 
 1. Generalize the implemented `MarketDataClient` behind `IMarketDataSource`
    when a third provider or streaming transport is added.
@@ -307,16 +347,19 @@ After the MVP is stable:
    rules before public or commercial distribution.
 3. Add incremental `update()` streaming, gap detection, reconnect, and bounded
    memory.
-4. Add drawing tools, undo/redo, and named chart-layout persistence.
+4. Expand symbol-scoped horizontal levels into trend lines and other drawing
+   primitives with selection, undo/redo, and named multi-workspace presets.
 5. Add durable scheduled/background notifications only after OS-specific
    lifecycle and permission handling are implemented.
-6. Add SEC EDGAR filing events and curated FRED release series only after
-   issuer mapping, release calendars, update policy, and provenance are
-   explicit; neither source supplies analyst price targets.
-7. Add multi-timeframe conditions, portfolio backtests, short selling, and
-   benchmark/risk-adjusted metrics only after calendar alignment,
-   adjusted-price policy, and annualization rules are explicit.
-8. Add paper trading only after quote freshness and audit requirements are
+6. Extend the implemented SEC/FRED adapters and CompanyFacts concept map only
+   after each additional form, concept, or release has an explicit accounting
+   mapping and provenance policy; neither source supplies analyst price
+   targets.
+7. Add portfolio-level strategy backtests, short selling, rolling-factor
+   attribution, and configurable risk-free-rate curves only after execution,
+   borrow-cost, calendar-alignment, and annualization rules are explicit.
+8. Extend the local average-cost paper ledger with broker-specific tax lots or
+   execution simulation only after quote freshness and audit requirements are
    defined.
 9. Add a Play Store App Bundle only after a stable signing-key backup,
     store-listing privacy disclosures, provider-terms review, and device-matrix
@@ -363,3 +406,23 @@ data in an emulator, use only expected permissions, and verify with
 `apksigner`. Version 0.5 also requires the Phase 10 cache and analytics
 invariants above, clear foreground-only alert wording, and reproducible
 reconciliation between each backtest trade list and its final equity.
+Version 0.6 additionally requires bounded and provenance-preserving SEC/FRED
+event acquisition, multi-condition strategy editing and holdout metrics,
+restart-safe local alert persistence, reconciled average-cost paper portfolios,
+exact-timestamp comparison statistics, synchronized comparison charts, and
+symbol-scoped price levels. Every unavailable or partial result must remain
+explicit rather than being presented as a complete valuation, correlation, or
+real-time service.
+Version 0.7 additionally requires explicit requested/applied price bases,
+quality diagnostics without adjusted-cache contamination, no-lookahead
+multi-timeframe strategy evaluation, reproducible robustness reports,
+history-aligned portfolio risk, schema migration, and non-executing allocation
+targets. Desktop, web, deployable Windows, and Android portability gates must
+all pass.
+Version 0.8 additionally requires accession-preserving SEC CompanyFacts
+storage, filing-date and price-date point-in-time boundaries, deterministic
+annual/quarterly/TTM reconstruction, transparent ratio and DCF inputs,
+same-unit peer comparison, a locally cached current-universe screen,
+descriptive event-impact windows, and de-duplicated opt-in foreground
+fundamental alerts. Missing facts, prices, comparable units, or benchmark
+history must remain explicit.

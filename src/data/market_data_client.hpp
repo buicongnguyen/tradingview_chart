@@ -27,6 +27,8 @@ namespace tvchart {
 
 struct MarketDataResult {
     Bars bars;
+    Bars rawBars;
+    std::vector<CorporateAction> corporateActions;
     QString source;
     MarketDataMetadata metadata;
     QString error;
@@ -45,6 +47,11 @@ public:
     explicit MarketDataClient(QObject* parent = nullptr);
 
     void fetch(QString symbol, Timeframe timeframe, Callback callback);
+    void fetch(
+        QString symbol,
+        Timeframe timeframe,
+        PriceAdjustmentMode adjustmentMode,
+        Callback callback);
     void cancel();
     void setTwelveDataKey(QString apiKey);
 
@@ -54,23 +61,28 @@ private:
     void requestYahoo(
         const QString& symbol,
         Timeframe timeframe,
+        PriceAdjustmentMode adjustmentMode,
         std::uint64_t generation,
         Callback callback);
     void requestTwelveData(
         const QString& symbol,
         Timeframe timeframe,
+        PriceAdjustmentMode adjustmentMode,
         std::uint64_t generation,
         QString yahooError,
         Callback callback);
     void processYahooResponse(
         const QString& symbol,
         Timeframe timeframe,
+        PriceAdjustmentMode adjustmentMode,
         std::uint64_t generation,
         int httpStatus,
         QString transportError,
         QByteArray payload,
         Callback callback);
     void processTwelveDataResponse(
+        Timeframe timeframe,
+        PriceAdjustmentMode adjustmentMode,
         std::uint64_t generation,
         QString yahooError,
         int httpStatus,

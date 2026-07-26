@@ -1,5 +1,7 @@
 #pragma once
 
+#include "domain/bar.hpp"
+
 #include <QByteArray>
 #include <QString>
 
@@ -37,6 +39,7 @@ struct StrategyOperand {
     StrategyField field{StrategyField::Close};
     std::uint32_t period{20};
     double multiplier{1.0};
+    std::optional<Timeframe> timeframe;
 
     [[nodiscard]] bool operator==(const StrategyOperand&) const = default;
 };
@@ -58,7 +61,7 @@ struct ConditionGroup {
 };
 
 struct StrategyDefinition {
-    static constexpr int currentSchemaVersion{1};
+    static constexpr int currentSchemaVersion{2};
 
     QString id;
     QString name;
@@ -75,6 +78,13 @@ struct StrategyLoadResult {
     [[nodiscard]] bool ok() const noexcept { return error.isEmpty(); }
 };
 
+struct StrategyLibraryLoadResult {
+    std::vector<StrategyDefinition> strategies;
+    QString error;
+
+    [[nodiscard]] bool ok() const noexcept { return error.isEmpty(); }
+};
+
 [[nodiscard]] QString strategyFieldId(StrategyField field);
 [[nodiscard]] QString strategyFieldLabel(StrategyField field);
 [[nodiscard]] QString strategyComparisonId(StrategyComparison comparison);
@@ -84,5 +94,9 @@ struct StrategyLoadResult {
 [[nodiscard]] QString validateStrategy(const StrategyDefinition& strategy);
 [[nodiscard]] QByteArray serializeStrategy(const StrategyDefinition& strategy);
 [[nodiscard]] StrategyLoadResult deserializeStrategy(const QByteArray& json);
+[[nodiscard]] QByteArray serializeStrategyLibrary(
+    const std::vector<StrategyDefinition>& strategies);
+[[nodiscard]] StrategyLibraryLoadResult deserializeStrategyLibrary(
+    const QByteArray& json);
 
 } // namespace tvchart
