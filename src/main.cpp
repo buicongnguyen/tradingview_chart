@@ -13,7 +13,7 @@ int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("buicongnguyen"));
     QCoreApplication::setApplicationName(QStringLiteral("TradingViewChart"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.3.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.4.0"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(

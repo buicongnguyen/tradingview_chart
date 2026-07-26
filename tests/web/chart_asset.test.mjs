@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const indexUrl = new URL("../../assets/web/index.html", import.meta.url);
+const mobileUrl = new URL("../../android/assets/web/mobile.html", import.meta.url);
 const chartUrl = new URL("../../assets/web/chart.js", import.meta.url);
 
 test("embedded page has no runtime CDN dependency", async () => {
@@ -14,6 +15,15 @@ test("embedded page has no runtime CDN dependency", async () => {
   assert.match(html, /id="crosshair-details"/);
 });
 
+test("Android page is local-only and selects the native mobile host", async () => {
+  const html = await readFile(mobileUrl, "utf8");
+  assert.doesNotMatch(html, /https?:\/\//i);
+  assert.match(html, /connect-src 'none'/);
+  assert.match(html, /data-host="mobile"/);
+  assert.doesNotMatch(html, /qwebchannel/i);
+  assert.match(html, /vendor\/lightweight-charts\.standalone\.production\.js/);
+});
+
 test("renderer keeps attribution and receives application data", async () => {
   const source = await readFile(chartUrl, "utf8");
   assert.doesNotThrow(() => new Function(source));
@@ -22,6 +32,8 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /bridge\.seriesChanged\.connect/);
   assert.match(source, /bridge\.indicatorsChanged\.connect/);
   assert.match(source, /bridge\.priceScaleModeChanged\.connect/);
+  assert.match(source, /window\.mobileChart = Object\.freeze/);
+  assert.match(source, /receiveMobileCommand/);
   assert.match(source, /chart\.subscribeCrosshairMove/);
   assert.match(source, /volumeRatio/);
   assert.match(source, /PriceScaleMode\.Logarithmic/);

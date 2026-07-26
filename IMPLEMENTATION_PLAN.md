@@ -2,13 +2,14 @@
 
 Status: original offline MVP completed on 2026-07-24; reviewed online-provider
 extension implemented on 2026-07-25; data-intelligence workstation package
-implemented on 2026-07-26.
+implemented on 2026-07-26; Android package implemented and emulator-tested on
+2026-07-26.
 
 ## 1. Goal and non-goals
 
-Build a Windows desktop chart workstation in C++20 and Qt with the interaction
-quality of the `TradeViewer_alt` desktop chart, replacing its custom QPainter
-renderer with the open-source TradingView Lightweight Charts library.
+Build Windows and Android chart applications in C++20 and Qt with the
+interaction quality of the `TradeViewer_alt` chart, replacing its custom
+QPainter renderer with the open-source TradingView Lightweight Charts library.
 
 The application preserves offline operation while using direct market-data
 providers when a network is available:
@@ -21,9 +22,9 @@ providers when a network is available:
 - it has no Alpaca code or broker coupling.
 
 Non-goals are real-money trading, scraping TradingView, unofficial TradingView
-data endpoints, mobile packaging, screeners, alerts, backtesting, and paper
-order execution. Yahoo's chart endpoint is explicitly labeled as unofficial
-and is never presented as a TradingView data service.
+data endpoints, app-store publication, screeners, alerts, backtesting, and
+paper order execution. Yahoo's chart endpoint is explicitly labeled as
+unofficial and is never presented as a TradingView data service.
 
 ## 2. Reviewed findings
 
@@ -200,6 +201,19 @@ margin formula tests pass; provider calendar failure preserves a valid
 overview; the UI never describes an estimated earnings date as confirmed or a
 calculated margin threshold as a future margin-call date.
 
+### Phase 9 — Android APK
+
+Deliver a Qt Quick Android shell, local Android WebView chart renderer, native
+Android HTTPS adapter, responsive system-bar handling, minimal permissions,
+launcher branding, deterministic offline fallback, signed ARM64 packaging, and
+GitHub Actions APK verification.
+
+Gate: the x86_64 debug build installs and retrieves validated Yahoo data in an
+API 36 emulator; the signed ARM64 release APK passes `apksigner`; the manifest
+contains Internet access but no location/storage permissions; the renderer and
+license assets are packaged locally; and GitHub Releases provides the APK and
+SHA-256 checksum.
+
 ## 5. Follow-on roadmap
 
 After the MVP is stable:
@@ -221,6 +235,9 @@ After the MVP is stable:
    explicit.
 9. Add paper trading only after quote freshness and audit requirements are
    defined.
+10. Add a Play Store App Bundle only after a stable signing-key backup,
+    store-listing privacy disclosures, provider-terms review, and device-matrix
+    testing.
 
 ## 6. Risks and mitigations
 
@@ -228,6 +245,12 @@ After the MVP is stable:
   docs; never add hidden or scraped TradingView endpoints.
 - **WebEngine package size:** keep it explicit in prerequisites and deployment;
   do not replace it with an unsupported C++ port.
+- **Android WebEngine availability:** use Qt WebView with the maintained system
+  WebView because Qt WebEngine is desktop-only.
+- **Android TLS maintenance:** use Android's HTTPS stack and device trust store
+  instead of bundling an aging OpenSSL binary.
+- **Signing-key loss:** keep the key outside Git and require a secure backup;
+  existing installations cannot accept upgrades signed by a replacement key.
 - **C++/JavaScript type drift:** centralize JSON conversion in `ChartBridge` and
   test timestamp/number constraints.
 - **License regression:** pin the version, vendor upstream LICENSE/NOTICE, keep
@@ -247,9 +270,11 @@ and build, pass unit tests, complete the network-independent WebEngine smoke
 test, retrieve the active symbol from Yahoo, use Twelve Data when configured,
 fall back offline, import and validate CSV data, switch
 timeframe/style/theme, show TradingView attribution, package on Windows, and run
-without Alpaca credentials or an application-owned backend. Version 0.3 also
+without Alpaca credentials or an application-owned backend. Version 0.4 also
 requires persistent named watchlists, conservative source/freshness labels,
 crosshair details, configurable multi-indicators, Linear/Log/Percent scale
 switching, provenance-aware research records, latest-per-organization target
 summaries, an explicitly estimated event calendar, and a transparent
-margin-maintenance scenario.
+margin-maintenance scenario. The Android APK must additionally run live Yahoo
+data in an emulator, use only expected permissions, and verify with
+`apksigner`.

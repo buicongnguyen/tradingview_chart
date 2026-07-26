@@ -105,7 +105,10 @@ QJsonArray ChartBridge::toJson(const Bars& bars) {
     QJsonArray output;
     for (const auto& bar : bars) {
         output.append(QJsonObject{
-            {QStringLiteral("time"), bar.timestamp},
+            {
+                QStringLiteral("time"),
+                static_cast<qint64>(bar.timestamp),
+            },
             {QStringLiteral("open"), bar.open},
             {QStringLiteral("high"), bar.high},
             {QStringLiteral("low"), bar.low},
@@ -132,7 +135,10 @@ QJsonObject ChartBridge::indicatorToJson(
         QJsonArray output;
         for (const auto& point : points) {
             output.append(QJsonObject{
-                {QStringLiteral("time"), point.timestamp},
+                {
+                    QStringLiteral("time"),
+                    static_cast<qint64>(point.timestamp),
+                },
                 {QStringLiteral("value"), point.value},
             });
         }

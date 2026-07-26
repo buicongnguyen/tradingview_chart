@@ -2799,7 +2799,7 @@ void MainWindow::showAbout() {
     dialog.setMinimumWidth(560);
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
-        tr("<h2>TradingView Chart 0.3.0</h2>"
+        tr("<h2>TradingView Chart 0.4.0</h2>"
            "<p>A C++/Qt market chart viewer with online and offline sources.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "

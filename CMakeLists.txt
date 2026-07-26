@@ -1,8 +1,12 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradingViewChart VERSION 0.3.0 LANGUAGES CXX)
+project(TradingViewChart VERSION 0.4.0 LANGUAGES CXX)
 
-option(TRADINGVIEW_CHART_BUILD_TESTS "Build the unit test suite" ON)
+option(
+    TRADINGVIEW_CHART_BUILD_TESTS
+    "Build the unit test suite (desktop host builds only)"
+    ON
+)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,15 +15,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS
-    Core
-    Gui
-    Network
-    Widgets
-    WebChannel
-    WebEngineCore
-    WebEngineWidgets
-)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network)
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/vendor/lightweight-charts.standalone.production.js")
     message(FATAL_ERROR
@@ -59,28 +55,136 @@ else()
     target_compile_options(tradingview_chart_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-qt_add_executable(tradingview_chart WIN32
-    src/main.cpp
-    src/main_window.cpp
-    src/main_window.hpp
-    src/chart/chart_view.cpp
-    src/chart/chart_view.hpp
-    src/data/market_data_client.cpp
-    src/data/market_data_client.hpp
-    src/research/alpha_vantage_research_client.cpp
-    src/research/alpha_vantage_research_client.hpp
-    resources.qrc
-)
-target_link_libraries(tradingview_chart PRIVATE
-    tradingview_chart_core
-    Qt6::Core
-    Qt6::Gui
-    Qt6::Network
-    Qt6::Widgets
-    Qt6::WebChannel
-    Qt6::WebEngineCore
-    Qt6::WebEngineWidgets
-)
+if(ANDROID)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Qml Quick QuickControls2 WebView)
+    qt_policy(SET QTP0001 NEW)
+    qt_policy(SET QTP0002 NEW)
+    qt_policy(SET QTP0004 NEW)
+
+    qt_add_executable(tradingview_chart
+        src/android_main.cpp
+        src/data/android_http_client.cpp
+        src/data/android_http_client.hpp
+        src/data/market_data_client.cpp
+        src/data/market_data_client.hpp
+        src/mobile/mobile_controller.cpp
+        src/mobile/mobile_controller.hpp
+    )
+    set_source_files_properties(
+        qml/Main.qml
+        PROPERTIES QT_RESOURCE_ALIAS Main.qml
+    )
+    qt_add_qml_module(tradingview_chart
+        URI TradingViewChart
+        VERSION 1.0
+        QML_FILES
+            qml/Main.qml
+    )
+    target_link_libraries(tradingview_chart PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::QuickControls2
+        Qt6::WebView
+    )
+
+    # Android's native WebView can load package assets directly. Copy the
+    # canonical chart renderer into a generated package overlay so the desktop
+    # and mobile applications cannot silently drift to different libraries.
+    set(android_package_dir "${CMAKE_CURRENT_BINARY_DIR}/android-package")
+    file(MAKE_DIRECTORY "${android_package_dir}/assets/web/vendor")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/android/AndroidManifest.xml"
+        "${android_package_dir}/AndroidManifest.xml"
+        COPYONLY
+    )
+    file(
+        COPY "${CMAKE_CURRENT_SOURCE_DIR}/android/res"
+        DESTINATION "${android_package_dir}"
+    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/android/assets/web/mobile.html"
+        "${android_package_dir}/assets/web/mobile.html"
+        COPYONLY
+    )
+    foreach(web_asset IN ITEMS
+        chart.js
+        styles.css
+        vendor/lightweight-charts.standalone.production.js
+    )
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/${web_asset}"
+            "${android_package_dir}/assets/web/${web_asset}"
+            COPYONLY
+        )
+    endforeach()
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/android/src/com/buicongnguyen/tradingviewchart/AndroidHttpClient.java"
+        "${android_package_dir}/src/com/buicongnguyen/tradingviewchart/AndroidHttpClient.java"
+        COPYONLY
+    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/android/src/com/buicongnguyen/tradingviewchart/AndroidUiMetrics.java"
+        "${android_package_dir}/src/com/buicongnguyen/tradingviewchart/AndroidUiMetrics.java"
+        COPYONLY
+    )
+    file(MAKE_DIRECTORY "${android_package_dir}/assets/licenses")
+    foreach(license_file IN ITEMS
+        LICENSE
+        THIRD_PARTY_NOTICES.md
+        assets/web/vendor/LICENSE.lightweight-charts
+        assets/web/vendor/NOTICE.lightweight-charts
+    )
+        get_filename_component(license_name "${license_file}" NAME)
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/${license_file}"
+            "${android_package_dir}/assets/licenses/${license_name}"
+            COPYONLY
+        )
+    endforeach()
+
+    set_target_properties(tradingview_chart PROPERTIES
+        QT_ANDROID_PACKAGE_NAME "com.buicongnguyen.tradingviewchart"
+        QT_ANDROID_PACKAGE_SOURCE_DIR "${android_package_dir}"
+        QT_ANDROID_MIN_SDK_VERSION 28
+        QT_ANDROID_TARGET_SDK_VERSION 36
+        QT_ANDROID_VERSION_CODE 400
+        QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
+    )
+
+else()
+    find_package(Qt6 6.8 REQUIRED COMPONENTS
+        Widgets
+        WebChannel
+        WebEngineCore
+        WebEngineWidgets
+    )
+
+    qt_add_executable(tradingview_chart WIN32
+        src/main.cpp
+        src/main_window.cpp
+        src/main_window.hpp
+        src/chart/chart_view.cpp
+        src/chart/chart_view.hpp
+        src/data/market_data_client.cpp
+        src/data/market_data_client.hpp
+        src/research/alpha_vantage_research_client.cpp
+        src/research/alpha_vantage_research_client.hpp
+        resources.qrc
+    )
+    target_link_libraries(tradingview_chart PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Network
+        Qt6::Widgets
+        Qt6::WebChannel
+        Qt6::WebEngineCore
+        Qt6::WebEngineWidgets
+    )
+endif()
 
 if(MSVC)
     target_compile_options(tradingview_chart PRIVATE /W4 /permissive-)
@@ -88,7 +192,7 @@ else()
     target_compile_options(tradingview_chart PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-if(TRADINGVIEW_CHART_BUILD_TESTS)
+if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
     enable_testing()
     find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
 
@@ -165,14 +269,16 @@ if(TRADINGVIEW_CHART_BUILD_TESTS)
     )
 endif()
 
-install(TARGETS tradingview_chart
-    RUNTIME DESTINATION .
-    BUNDLE DESTINATION .
-)
-install(FILES
-    LICENSE
-    THIRD_PARTY_NOTICES.md
-    assets/web/vendor/LICENSE.lightweight-charts
-    assets/web/vendor/NOTICE.lightweight-charts
-    DESTINATION licenses
-)
+if(NOT ANDROID)
+    install(TARGETS tradingview_chart
+        RUNTIME DESTINATION .
+        BUNDLE DESTINATION .
+    )
+    install(FILES
+        LICENSE
+        THIRD_PARTY_NOTICES.md
+        assets/web/vendor/LICENSE.lightweight-charts
+        assets/web/vendor/NOTICE.lightweight-charts
+        DESTINATION licenses
+    )
+endif()
