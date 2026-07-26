@@ -11,11 +11,15 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <ranges>
+#include <utility>
+#include <vector>
 
 namespace tvchart {
 namespace {
 
 constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
+constexpr auto kMaximumCorporateActions = std::size_t{10'000};
 
 [[nodiscard]] std::optional<double> finiteNumber(const QJsonValue& value) {
     bool ok = false;
@@ -51,17 +55,19 @@ constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
     };
 }
 
-[[nodiscard]] MarketDataParseResult finish(Bars bars, const QString& provider) {
+[[nodiscard]] MarketDataParseResult finish(
+    MarketDataParseResult parsed,
+    const QString& provider) {
     std::stable_sort(
-        bars.begin(),
-        bars.end(),
+        parsed.bars.begin(),
+        parsed.bars.end(),
         [](const Bar& left, const Bar& right) {
             return left.timestamp < right.timestamp;
         });
 
     Bars normalized;
-    normalized.reserve(bars.size());
-    for (const auto& bar : bars) {
+    normalized.reserve(parsed.bars.size());
+    for (const auto& bar : parsed.bars) {
         if (!normalized.empty() &&
             normalized.back().timestamp == bar.timestamp) {
             if (normalized.back() != bar) {
@@ -73,22 +79,23 @@ constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
                             .arg(bar.timestamp),
                 };
             }
+            ++parsed.duplicateRows;
             continue;
         }
         normalized.push_back(bar);
     }
-    bars = std::move(normalized);
+    parsed.bars = std::move(normalized);
 
-    if (bars.empty()) {
+    if (parsed.bars.empty()) {
         return {.error = QStringLiteral("%1 returned no usable OHLCV bars.").arg(provider)};
     }
-    if (const auto error = validateBars(bars)) {
+    if (const auto error = validateBars(parsed.bars)) {
         return {
             .error = QStringLiteral("%1 returned invalid bars: %2")
                          .arg(provider, QString::fromStdString(*error)),
         };
     }
-    return {.bars = std::move(bars)};
+    return parsed;
 }
 
 [[nodiscard]] std::optional<Bar> yahooBar(
@@ -156,6 +163,110 @@ constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
     return timestamp;
 }
 
+[[nodiscard]] std::optional<std::pair<double, double>> splitRatio(
+    const QJsonObject& object) {
+    const auto numerator = finiteNumber(
+        object.value(QStringLiteral("numerator")));
+    const auto denominator = finiteNumber(
+        object.value(QStringLiteral("denominator")));
+    if (numerator && denominator) {
+        return std::pair{*numerator, *denominator};
+    }
+    const auto pieces =
+        object.value(QStringLiteral("splitRatio"))
+            .toString()
+            .split(u':');
+    if (pieces.size() != 2) {
+        return std::nullopt;
+    }
+    bool numeratorOk = false;
+    bool denominatorOk = false;
+    const auto parsedNumerator =
+        pieces.at(0).trimmed().toDouble(&numeratorOk);
+    const auto parsedDenominator =
+        pieces.at(1).trimmed().toDouble(&denominatorOk);
+    if (!numeratorOk || !denominatorOk) {
+        return std::nullopt;
+    }
+    return std::pair{parsedNumerator, parsedDenominator};
+}
+
+[[nodiscard]] QString parseYahooActions(
+    const QJsonObject& events,
+    std::vector<CorporateAction>& actions) {
+    const auto append =
+        [&](const QJsonObject& collection,
+            const CorporateActionType type) -> QString {
+        for (auto iterator = collection.begin();
+             iterator != collection.end();
+             ++iterator) {
+            if (actions.size() >= kMaximumCorporateActions) {
+                return QStringLiteral(
+                    "Yahoo Finance returned too many corporate actions.");
+            }
+            if (!iterator.value().isObject()) {
+                continue;
+            }
+            const auto object = iterator.value().toObject();
+            const auto timestamp = unixTimestamp(
+                object.value(QStringLiteral("date")));
+            if (!timestamp) {
+                continue;
+            }
+            CorporateAction action{
+                .type = type,
+                .timestamp = *timestamp,
+                .currency =
+                    object.value(QStringLiteral("currency")).toString(),
+                .provider = QStringLiteral("Yahoo Finance"),
+            };
+            if (type == CorporateActionType::CashDividend) {
+                const auto amount = finiteNumber(
+                    object.value(QStringLiteral("amount")));
+                if (!amount) {
+                    continue;
+                }
+                action.amount = *amount;
+            } else {
+                const auto ratio = splitRatio(object);
+                if (!ratio) {
+                    continue;
+                }
+                action.numerator = ratio->first;
+                action.denominator = ratio->second;
+            }
+            if (validateCorporateAction(action).isEmpty()) {
+                actions.push_back(std::move(action));
+            }
+        }
+        return {};
+    };
+    if (const auto error = append(
+            events.value(QStringLiteral("dividends")).toObject(),
+            CorporateActionType::CashDividend);
+        !error.isEmpty()) {
+        return error;
+    }
+    if (const auto error = append(
+            events.value(QStringLiteral("splits")).toObject(),
+            CorporateActionType::StockSplit);
+        !error.isEmpty()) {
+        return error;
+    }
+    std::ranges::sort(
+        actions,
+        [](const CorporateAction& left, const CorporateAction& right) {
+            if (left.timestamp != right.timestamp) {
+                return left.timestamp < right.timestamp;
+            }
+            return left.type < right.type;
+        });
+    actions.erase(
+        std::unique(actions.begin(), actions.end()),
+        actions.end());
+    return {};
+}
+
 } // namespace
 
 MarketDataParseResult MarketDataParser::parseYahoo(const QByteArray& payload) {
@@ -204,18 +315,50 @@ MarketDataParseResult MarketDataParser::parseYahoo(const QByteArray& payload) {
     const auto lows = quote.value(QStringLiteral("low")).toArray();
     const auto closes = quote.value(QStringLiteral("close")).toArray();
     const auto volumes = quote.value(QStringLiteral("volume")).toArray();
-    const auto count =
-        std::min({timestamps.size(), opens.size(), highs.size(), lows.size(), closes.size()});
+    const auto adjustedCollections =
+        result.value(QStringLiteral("indicators"))
+            .toObject()
+            .value(QStringLiteral("adjclose"))
+            .toArray();
+    const auto adjusted =
+        adjustedCollections.isEmpty()
+            ? QJsonArray{}
+            : adjustedCollections.at(0)
+                  .toObject()
+                  .value(QStringLiteral("adjclose"))
+                  .toArray();
 
-    Bars bars;
-    bars.reserve(static_cast<std::size_t>(count));
-    for (qsizetype index = 0; index < count; ++index) {
+    MarketDataParseResult parsed{
+        .inputRows = static_cast<std::size_t>(timestamps.size()),
+    };
+    parsed.bars.reserve(static_cast<std::size_t>(timestamps.size()));
+    parsed.adjustedCloses.reserve(
+        static_cast<std::size_t>(timestamps.size()));
+    for (qsizetype index = 0; index < timestamps.size(); ++index) {
         if (auto bar = yahooBar(
                 timestamps, opens, highs, lows, closes, volumes, index)) {
-            bars.push_back(*bar);
+            parsed.bars.push_back(*bar);
+            if (index < adjusted.size()) {
+                const auto adjustedClose =
+                    finiteNumber(adjusted.at(index));
+                if (adjustedClose && *adjustedClose > 0.0) {
+                    parsed.adjustedCloses.push_back({
+                        .timestamp = bar->timestamp,
+                        .adjustedClose = *adjustedClose,
+                    });
+                }
+            }
+        } else {
+            ++parsed.rejectedRows;
         }
     }
-    auto parsed = finish(std::move(bars), QStringLiteral("Yahoo Finance"));
+    if (const auto error = parseYahooActions(
+            result.value(QStringLiteral("events")).toObject(),
+            parsed.corporateActions);
+        !error.isEmpty()) {
+        return {.error = error};
+    }
+    parsed = finish(std::move(parsed), QStringLiteral("Yahoo Finance"));
     if (!parsed.ok()) {
         return parsed;
     }
@@ -282,8 +425,10 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
     }
 
     const auto values = root.value(QStringLiteral("values")).toArray();
-    Bars bars;
-    bars.reserve(static_cast<std::size_t>(values.size()));
+    MarketDataParseResult parsed{
+        .inputRows = static_cast<std::size_t>(values.size()),
+    };
+    parsed.bars.reserve(static_cast<std::size_t>(values.size()));
     for (const auto& value : values) {
         const auto object = value.toObject();
         const auto timestamp =
@@ -295,6 +440,7 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
         const auto low = finiteNumber(object.value(QStringLiteral("low")));
         const auto close = finiteNumber(object.value(QStringLiteral("close")));
         if (!timestamp || !open || !high || !low || !close) {
+            ++parsed.rejectedRows;
             continue;
         }
 
@@ -303,6 +449,7 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
         if (!volumeValue.isUndefined() && !volumeValue.isNull()) {
             const auto parsedVolume = finiteNumber(volumeValue);
             if (!parsedVolume) {
+                ++parsed.rejectedRows;
                 continue;
             }
             volume = *parsedVolume;
@@ -317,10 +464,12 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
             .volume = volume,
         };
         if (!validateBar(bar)) {
-            bars.push_back(bar);
+            parsed.bars.push_back(bar);
+        } else {
+            ++parsed.rejectedRows;
         }
     }
-    auto parsed = finish(std::move(bars), QStringLiteral("Twelve Data"));
+    parsed = finish(std::move(parsed), QStringLiteral("Twelve Data"));
     if (!parsed.ok()) {
         return parsed;
     }

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradingViewChart VERSION 0.5.0 LANGUAGES CXX)
+project(TradingViewChart VERSION 0.8.0 LANGUAGES CXX)
 
 option(
     TRADINGVIEW_CHART_BUILD_TESTS
@@ -24,12 +24,26 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/vendor/lightweight-charts.
 endif()
 
 add_library(tradingview_chart_core
+    src/analysis/comparison_analysis.cpp
+    src/analysis/comparison_analysis.hpp
     src/analysis/technical_indicators.cpp
     src/analysis/technical_indicators.hpp
     src/chart/chart_bridge.cpp
     src/chart/chart_bridge.hpp
     src/domain/bar.cpp
     src/domain/bar.hpp
+    src/fundamentals/event_impact.cpp
+    src/fundamentals/event_impact.hpp
+    src/fundamentals/fundamental_analysis.cpp
+    src/fundamentals/fundamental_analysis.hpp
+    src/fundamentals/fundamental_models.cpp
+    src/fundamentals/fundamental_models.hpp
+    src/fundamentals/fundamental_screener.cpp
+    src/fundamentals/fundamental_screener.hpp
+    src/fundamentals/fundamental_store.cpp
+    src/fundamentals/fundamental_store.hpp
+    src/fundamentals/sec_companyfacts_parser.cpp
+    src/fundamentals/sec_companyfacts_parser.hpp
     src/data/csv_bar_loader.cpp
     src/data/csv_bar_loader.hpp
     src/data/demo_data_source.cpp
@@ -38,8 +52,16 @@ add_library(tradingview_chart_core
     src/data/historical_data_store.hpp
     src/data/market_data_parser.cpp
     src/data/market_data_parser.hpp
+    src/data/market_data_quality.cpp
+    src/data/market_data_quality.hpp
+    src/portfolio/portfolio_models.cpp
+    src/portfolio/portfolio_models.hpp
+    src/portfolio/portfolio_risk.cpp
+    src/portfolio/portfolio_risk.hpp
     src/research/alpha_vantage_research_parser.cpp
     src/research/alpha_vantage_research_parser.hpp
+    src/research/event_intelligence_parser.cpp
+    src/research/event_intelligence_parser.hpp
     src/research/margin_risk.cpp
     src/research/margin_risk.hpp
     src/research/research_models.cpp
@@ -160,7 +182,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${android_package_dir}"
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 36
-        QT_ANDROID_VERSION_CODE 500
+        QT_ANDROID_VERSION_CODE 800
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
     )
 
@@ -180,10 +202,18 @@ else()
         src/chart/chart_view.hpp
         src/data/market_data_client.cpp
         src/data/market_data_client.hpp
+        src/fundamentals/fundamental_workbench_widget.cpp
+        src/fundamentals/fundamental_workbench_widget.hpp
         src/network/bounded_network_reply.cpp
         src/network/bounded_network_reply.hpp
+        src/fundamentals/sec_fundamentals_client.cpp
+        src/fundamentals/sec_fundamentals_client.hpp
+        src/portfolio/portfolio_widget.cpp
+        src/portfolio/portfolio_widget.hpp
         src/research/alpha_vantage_research_client.cpp
         src/research/alpha_vantage_research_client.hpp
+        src/research/event_intelligence_client.cpp
+        src/research/event_intelligence_client.hpp
         src/strategy/strategy_lab_widget.cpp
         src/strategy/strategy_lab_widget.hpp
         resources.qrc
@@ -286,6 +316,46 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         COMMAND tradingview_chart_strategy_tests
     )
 
+    add_executable(tradingview_chart_portfolio_tests
+        tests/portfolio_models_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_portfolio_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_portfolio_tests
+        COMMAND tradingview_chart_portfolio_tests
+    )
+
+    add_executable(tradingview_chart_comparison_tests
+        tests/comparison_analysis_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_comparison_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_comparison_tests
+        COMMAND tradingview_chart_comparison_tests
+    )
+
+    add_executable(tradingview_chart_fundamental_tests
+        tests/fundamental_analysis_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_fundamental_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Sql
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_fundamental_tests
+        COMMAND tradingview_chart_fundamental_tests
+    )
+
     set_tests_properties(
         tradingview_chart_tests
         tradingview_chart_indicator_tests
@@ -293,6 +363,9 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         tradingview_chart_research_tests
         tradingview_chart_history_tests
         tradingview_chart_strategy_tests
+        tradingview_chart_portfolio_tests
+        tradingview_chart_comparison_tests
+        tradingview_chart_fundamental_tests
         PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QSQLiteDriverPlugin>/.."

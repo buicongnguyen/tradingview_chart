@@ -25,6 +25,7 @@ class QListWidget;
 class QPushButton;
 class QSettings;
 class QSpinBox;
+class QSplitter;
 class QTableWidget;
 class QTableWidgetItem;
 class QTimer;
@@ -34,8 +35,13 @@ namespace tvchart {
 class MarketDataClient;
 class HistoricalDataStore;
 class AlphaVantageResearchClient;
+class EventIntelligenceClient;
+class FundamentalStore;
+class FundamentalWorkbenchWidget;
+class PortfolioWidget;
 class StrategyLabWidget;
 struct AlphaVantageResearchResult;
+struct EventIntelligenceResult;
 
 class MainWindow final : public QMainWindow {
     Q_OBJECT
@@ -77,7 +83,9 @@ private:
     void buildAnalysisDock();
     void buildDataStatusDock();
     void buildResearchDock();
+    void buildFundamentalDock();
     void buildMarginRiskDock();
+    void buildPortfolioDock();
     void buildStrategyLabDock();
     void restoreSettings();
     void restoreIndicatorSettings(QSettings& settings);
@@ -95,7 +103,8 @@ private:
         Bars bars,
         MarketDataMetadata metadata,
         const QString& lifecycle,
-        const QString& detail = {});
+        const QString& detail = {},
+        Bars rawCacheBars = {});
     void updateTechnicalAnalysis();
     void handleIndicatorConfigurationChanged();
     [[nodiscard]] std::vector<IndicatorSpec> activeIndicatorSpecs() const;
@@ -121,8 +130,11 @@ private:
     void exportWatchlist();
 
     void refreshResearchFromProvider();
+    void refreshSecFilings();
+    void refreshFredCalendar();
     void refreshResearchDisplay();
     void mergeResearchResult(AlphaVantageResearchResult result);
+    void mergeEventIntelligenceResult(EventIntelligenceResult result);
     void addTargetEstimate();
     void removeTargetEstimate();
     void importTargetEstimates();
@@ -130,9 +142,20 @@ private:
     void addResearchEvent();
     void removeResearchEvent();
     void recalculateMarginRisk();
+    void setChartLayout(const QString& layout);
+    void loadComparisonData();
+    void applyComparisonSeries(
+        const QString& symbol,
+        const QString& source,
+        Bars bars,
+        const MarketDataMetadata& metadata);
+    void refreshComparisonAnalysis();
+    void addPriceLevel();
+    void clearPriceLevels();
     void showReplaySeries(Bars bars);
     void restoreFullSeries();
     void refreshStrategyWatchlist();
+    void refreshFundamentalUniverse();
 
     void showLoadingDataStatus(const QString& symbol, const QString& timeframe);
     void updateDataStatus(
@@ -147,6 +170,7 @@ private:
     [[nodiscard]] QString activeSymbol() const;
     [[nodiscard]] Timeframe activeTimeframe() const;
     [[nodiscard]] QString activeTimeframeLabel() const;
+    [[nodiscard]] PriceAdjustmentMode activeAdjustmentMode() const noexcept;
     void setStatus(
         const QString& source,
         std::size_t barCount,
@@ -154,10 +178,17 @@ private:
         const QString& timeframe);
 
     ChartView* chartView_{};
+    ChartView* comparisonChartView_{};
+    QSplitter* chartSplitter_{};
     MarketDataClient* marketDataClient_{};
+    MarketDataClient* comparisonDataClient_{};
     AlphaVantageResearchClient* researchClient_{};
+    EventIntelligenceClient* eventIntelligenceClient_{};
+    FundamentalWorkbenchWidget* fundamentalWidget_{};
+    PortfolioWidget* portfolioWidget_{};
     StrategyLabWidget* strategyLab_{};
     std::unique_ptr<HistoricalDataStore> historyStore_;
+    std::unique_ptr<FundamentalStore> fundamentalStore_;
     QTimer* refreshTimer_{};
     QTimer* statusAgeTimer_{};
 
@@ -168,8 +199,12 @@ private:
     QLineEdit* watchlistNoteInput_{};
 
     QComboBox* timeframeSelector_{};
+    QComboBox* priceBasisSelector_{};
     QComboBox* styleSelector_{};
     QComboBox* scaleSelector_{};
+    QComboBox* chartLayoutSelector_{};
+    QLineEdit* comparisonSymbolInput_{};
+    QLabel* comparisonStatusLabel_{};
     QTableWidget* indicatorTable_{};
     std::vector<IndicatorControl> indicatorControls_;
 
@@ -185,6 +220,8 @@ private:
     QLabel* dataRetrievedLabel_{};
     QLabel* dataMarketLabel_{};
     QLabel* dataBarCountLabel_{};
+    QLabel* dataPriceBasisLabel_{};
+    QLabel* dataQualityLabel_{};
     QLabel* dataDetailLabel_{};
 
     QLabel* researchProviderLabel_{};
@@ -195,6 +232,8 @@ private:
     QLabel* researchManualConsensusLabel_{};
     QLabel* researchNextEventLabel_{};
     QPushButton* researchRefreshButton_{};
+    QPushButton* secRefreshButton_{};
+    QPushButton* fredRefreshButton_{};
     QTableWidget* targetEstimateTable_{};
     QTableWidget* researchEventTable_{};
 
@@ -210,10 +249,14 @@ private:
 
     QAction* darkThemeAction_{};
     Bars currentBars_;
+    Bars comparisonBars_;
+    std::vector<ChartPriceLevel> priceLevels_;
     QString currentSeriesSymbol_;
+    QString comparisonSeriesSymbol_;
     WatchlistCollection watchlists_{defaultWatchlists()};
     ResearchWorkspace researchWorkspace_;
     DataStatusSnapshot dataStatus_;
+    MarketDataMetadata comparisonMetadata_;
     bool onlineDataEnabled_{true};
     bool settingsEnabled_{true};
     bool restoringSettings_{};

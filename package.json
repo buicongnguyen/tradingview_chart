@@ -1,7 +1,7 @@
 {
   "name": "tradingview-chart-assets",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.8.0",
   "description": "Pinned web assets for the TradingView Chart Qt application",
   "engines": {
     "node": ">=22.3"

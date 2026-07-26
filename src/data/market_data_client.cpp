@@ -103,7 +103,7 @@ struct YahooQuery {
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradingViewChart/0.5.0 (Qt 6; personal client)"));
+        QStringLiteral("TradingViewChart/0.8.0 (Qt 6; personal client)"));
     request.setRawHeader("Accept", "application/json");
     request.setTransferTimeout(15'000);
     request.setAttribute(
@@ -145,6 +145,18 @@ void MarketDataClient::fetch(
     QString symbol,
     const Timeframe timeframe,
     Callback callback) {
+    fetch(
+        std::move(symbol),
+        timeframe,
+        PriceAdjustmentMode::Raw,
+        std::move(callback));
+}
+
+void MarketDataClient::fetch(
+    QString symbol,
+    const Timeframe timeframe,
+    const PriceAdjustmentMode adjustmentMode,
+    Callback callback) {
     cancel();
     if (!callback) {
         return;
@@ -156,7 +168,12 @@ void MarketDataClient::fetch(
         return;
     }
     const auto requestGeneration = generation_;
-    requestYahoo(symbol, timeframe, requestGeneration, std::move(callback));
+    requestYahoo(
+        symbol,
+        timeframe,
+        adjustmentMode,
+        requestGeneration,
+        std::move(callback));
 }
 
 void MarketDataClient::cancel() {
@@ -184,6 +201,7 @@ bool MarketDataClient::hasTwelveDataKey() const noexcept {
 void MarketDataClient::requestYahoo(
     const QString& symbol,
     const Timeframe timeframe,
+    const PriceAdjustmentMode adjustmentMode,
     const std::uint64_t requestGeneration,
     Callback callback) {
     const auto querySettings = yahooQuery(timeframe);
@@ -206,6 +224,7 @@ void MarketDataClient::requestYahoo(
             this,
             symbol,
             timeframe,
+            adjustmentMode,
             requestGeneration,
             callback = std::move(callback)
         ](
@@ -218,6 +237,7 @@ void MarketDataClient::requestYahoo(
             processYahooResponse(
                 symbol,
                 timeframe,
+                adjustmentMode,
                 requestGeneration,
                 httpStatus,
                 std::move(transportError),
@@ -235,6 +255,7 @@ void MarketDataClient::requestYahoo(
          reply,
          symbol,
          timeframe,
+         adjustmentMode,
          requestGeneration,
          callback = std::move(callback)](
             BoundedNetworkReplyResult response) mutable {
@@ -252,6 +273,7 @@ void MarketDataClient::requestYahoo(
             processYahooResponse(
                 symbol,
                 timeframe,
+                adjustmentMode,
                 requestGeneration,
                 response.httpStatus,
                 std::move(response.transportError),
@@ -264,6 +286,7 @@ void MarketDataClient::requestYahoo(
 void MarketDataClient::requestTwelveData(
     const QString& symbol,
     const Timeframe timeframe,
+    const PriceAdjustmentMode adjustmentMode,
     const std::uint64_t requestGeneration,
     QString yahooError,
     Callback callback) {
@@ -283,6 +306,8 @@ void MarketDataClient::requestTwelveData(
         kMaximumPayloadBytes,
         [
             this,
+            timeframe,
+            adjustmentMode,
             requestGeneration,
             yahooError = std::move(yahooError),
             callback = std::move(callback)
@@ -294,6 +319,8 @@ void MarketDataClient::requestTwelveData(
                 activeRequestToken_ = 0;
             }
             processTwelveDataResponse(
+                timeframe,
+                adjustmentMode,
                 requestGeneration,
                 std::move(yahooError),
                 httpStatus,
@@ -310,6 +337,8 @@ void MarketDataClient::requestTwelveData(
         this,
         [this,
          reply,
+         timeframe,
+         adjustmentMode,
          requestGeneration,
          yahooError = std::move(yahooError),
          callback = std::move(callback)](
@@ -326,6 +355,8 @@ void MarketDataClient::requestTwelveData(
                     QStringLiteral("response exceeded 10 MiB.");
             }
             processTwelveDataResponse(
+                timeframe,
+                adjustmentMode,
                 requestGeneration,
                 std::move(yahooError),
                 response.httpStatus,
@@ -339,6 +370,7 @@ void MarketDataClient::requestTwelveData(
 void MarketDataClient::processYahooResponse(
     const QString& symbol,
     const Timeframe timeframe,
+    const PriceAdjustmentMode adjustmentMode,
     const std::uint64_t requestGeneration,
     const int httpStatus,
     QString transportError,
@@ -358,21 +390,51 @@ void MarketDataClient::processYahooResponse(
     if (error.isEmpty()) {
         auto parsed = MarketDataParser::parseYahoo(payload);
         if (parsed.ok()) {
-            parsed.metadata.retrievedAtUtc = QDateTime::currentSecsSinceEpoch();
-            callback({
-                .bars = std::move(parsed.bars),
-                .source = QStringLiteral("Yahoo Finance"),
-                .metadata = std::move(parsed.metadata),
-            });
-            return;
+            auto adjusted = applyPriceAdjustment(
+                parsed.bars,
+                parsed.corporateActions,
+                parsed.adjustedCloses,
+                adjustmentMode);
+            if (!adjusted.ok()) {
+                error = std::move(adjusted.error);
+            } else {
+                parsed.metadata.retrievedAtUtc =
+                    QDateTime::currentSecsSinceEpoch();
+                parsed.metadata.requestedAdjustmentMode = adjustmentMode;
+                parsed.metadata.appliedAdjustmentMode =
+                    adjusted.appliedMode;
+                parsed.metadata.corporateActionCount =
+                    parsed.corporateActions.size();
+                parsed.metadata.adjustmentWarning =
+                    std::move(adjusted.warning);
+                parsed.metadata.quality = analyzeMarketDataQuality(
+                    adjusted.bars,
+                    timeframe,
+                    parsed.inputRows,
+                    parsed.rejectedRows,
+                    parsed.duplicateRows,
+                    parsed.corporateActions);
+                callback({
+                    .bars = std::move(adjusted.bars),
+                    .rawBars = std::move(parsed.bars),
+                    .corporateActions =
+                        std::move(parsed.corporateActions),
+                    .source = QStringLiteral("Yahoo Finance"),
+                    .metadata = std::move(parsed.metadata),
+                });
+                return;
+            }
         }
-        error = std::move(parsed.error);
+        if (error.isEmpty()) {
+            error = std::move(parsed.error);
+        }
     }
 
     if (hasTwelveDataKey()) {
         requestTwelveData(
             symbol,
             timeframe,
+            adjustmentMode,
             requestGeneration,
             std::move(error),
             std::move(callback));
@@ -387,6 +449,8 @@ void MarketDataClient::processYahooResponse(
 }
 
 void MarketDataClient::processTwelveDataResponse(
+    const Timeframe timeframe,
+    const PriceAdjustmentMode adjustmentMode,
     const std::uint64_t requestGeneration,
     QString yahooError,
     const int httpStatus,
@@ -407,9 +471,36 @@ void MarketDataClient::processTwelveDataResponse(
     if (twelveError.isEmpty()) {
         auto parsed = MarketDataParser::parseTwelveData(payload);
         if (parsed.ok()) {
+            auto adjusted = applyPriceAdjustment(
+                parsed.bars,
+                {},
+                {},
+                adjustmentMode);
+            if (adjustmentMode != PriceAdjustmentMode::Raw) {
+                adjusted.bars = parsed.bars;
+                adjusted.appliedMode = PriceAdjustmentMode::Raw;
+                adjusted.warning =
+                    QStringLiteral(
+                        "Twelve Data response does not include the corporate "
+                        "actions required for the requested price basis; raw "
+                        "prices are shown.");
+            }
             parsed.metadata.retrievedAtUtc = QDateTime::currentSecsSinceEpoch();
+            parsed.metadata.requestedAdjustmentMode = adjustmentMode;
+            parsed.metadata.appliedAdjustmentMode =
+                adjusted.appliedMode;
+            parsed.metadata.adjustmentWarning =
+                std::move(adjusted.warning);
+            parsed.metadata.quality = analyzeMarketDataQuality(
+                adjusted.bars,
+                timeframe,
+                parsed.inputRows,
+                parsed.rejectedRows,
+                parsed.duplicateRows,
+                {});
             callback({
-                .bars = std::move(parsed.bars),
+                .bars = std::move(adjusted.bars),
+                .rawBars = std::move(parsed.bars),
                 .source = QStringLiteral("Twelve Data"),
                 .metadata = std::move(parsed.metadata),
             });

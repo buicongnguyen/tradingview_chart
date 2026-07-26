@@ -12,81 +12,79 @@ demo data. Local OHLCV CSV import remains available.
 Lightweight Charts is only the renderer. Provider availability, freshness,
 rate limits, terms, and market-data display rights still apply.
 
-## Version 0.5 features
+## Version 0.8 features
 
-- A desktop **Strategy Lab** with an editable entry rule and exit rule. The
-  underlying model supports multiple conditions and is shared by every
-  strategy feature.
-- Long-only historical backtests that evaluate completed bars and execute at
-  the next bar open, with configurable allocation, fixed commissions,
-  slippage, fractional shares, trade reconciliation, maximum drawdown, win
-  rate, profit factor, and exposure.
-- Deterministic bar replay with start depth, step, play/pause, and speed
-  controls.
-- A cached-watchlist scanner and foreground alerts using the exact same rule
-  evaluator. Alerts run only while the desktop application is open.
-- A local SQLite historical cache for successfully validated polled data.
-  Overlapping downloads are transactionally upserted without deleting older
-  non-overlapping bars, and each series retains provider, market metadata,
-  retrieval time, and cache time. Synthetic demo data is never cached.
-- A provider candle whose interval is still forming remains visible on the
-  chart but is excluded from cache, replay, backtests, scans, and alerts until
-  its interval has completed.
-- Bounded network/CSV reads, formula-safe spreadsheet exports, bounded research
-  targets, and Android packaging that cannot silently replace the established
-  signing identity or overwrite a signed APK with an unsigned build.
+- A desktop Fundamental Lab backed by the official SEC EDGAR CompanyFacts API:
+  filing-date-bounded annual, quarterly, and TTM series; accession/source
+  provenance; revenue/EPS growth; margins; FCF; mapped long-term
+  debt-to-equity; ROE; and price-dependent valuation multiples.
+- Scenario DCF and reverse-DCF growth analysis with editable assumptions and a
+  3×3 sensitivity table. These are transparent user scenarios, not analyst
+  targets or forecasts.
+- A saved local current-universe screen combining SEC fundamentals, raw daily
+  price/technical fields, earnings proximity, and currency-compatible
+  organization-target upside. Historical screens truncate both filings and
+  prices at their selected as-of date.
+- Fundamental history graphs, same-reported-unit cached peer comparison, and
+  earnings/filing event studies with opening gap, volume ratio, +1/+5/+20
+  trading-day returns, and optional benchmark-relative returns.
+- Opt-in foreground notifications for newer SEC filing accessions and
+  current-date fundamental screen matches, de-duplicated through the existing
+  local alert audit.
 
-- Native Qt Android application for Android 9 (API 28) and newer, distributed
-  as a signed ARM64 APK.
-- Responsive Qt Quick controls surrounding the same locally packaged
-  Lightweight Charts renderer used by the desktop application.
-- Android-native HTTPS through `HttpsURLConnection`, the device trust store,
-  and TLS-only URLs; no bundled OpenSSL binary or cleartext traffic.
-- Live Yahoo Finance data by default, plus an optional in-session Twelve Data
-  key that is not persisted.
-- Candlestick, line, and area charts with volume and the desktop calculation
-  engine's technical indicators on mobile.
-- Android CI that builds and inspects an unsigned reproducible APK on every
-  pull request; signed public APKs are attached to GitHub Releases.
+- Explicit raw, split-adjusted, and total-return price bases for Yahoo data,
+  with requested-versus-applied labeling, parsed dividends/splits, rejected-row
+  counts, bounded gap/outlier diagnostics, and a visible quality grade. Raw
+  bars remain the only series stored in the history cache.
+- No-lookahead multi-timeframe strategy operands and a robustness workbench
+  covering chronological walk-forward folds, deterministic trade-return Monte
+  Carlo, parameter-neighborhood stability, market regimes, and unchanged-rule
+  validation across compatible cached symbols.
+- History-aligned portfolio analytics with fixed-current-weight volatility,
+  drawdown, Sharpe, historical VaR/CVaR, benchmark beta/alpha, correlations,
+  risk contributions, XIRR, an explicitly approximate daily-close TWR,
+  persistent allocation targets, and non-executing rebalance suggestions.
 
-- Qt Widgets desktop shell with an embedded, local Qt WebEngine chart.
-- Candlestick, line, and area display modes.
-- Linear, logarithmic, and percentage price scales.
-- Volume overlay, pan, zoom, fit-to-data, and light/dark themes.
-- A crosshair information strip with UTC timestamp, OHLCV, candle change,
-  candle range, volume relative to its 20-bar average, and indicator values.
-- Several simultaneous, configurable local indicators: SMA, EMA,
-  UTC-session VWAP, RSI, MACD, rolling high, rolling low, and Volume SMA.
-  Oscillators receive independent panes and warm-up remains explicit.
-- A calculated-information panel with latest close, last-bar change, loaded
-  high/low range, range position, average volume (20), and all enabled indicator
-  values.
-- A data-status panel that distinguishes polled REST data, local CSV data, and
-  synthetic demo data; it also displays provider-reported delay, retrieval time,
-  last candle age, market metadata, and bar count.
-- Persistent named watchlists with add/remove, local notes, manual/ticker sort,
-  reorder, and CSV import/export.
-- A provenance-aware research workspace with an event calendar, provider
-  company overview, provider aggregate target/rating counts, and separately
-  calculated organization-level target summaries.
-- Manual organization-target and event entry with local persistence; target
-  CSV import/export retains organization, date, currency, rating, and source
-  URL.
-- Optional, explicit Alpha Vantage overview and earnings-calendar refresh
-  through `ALPHA_VANTAGE_API_KEY`. Research requests are never made
-  automatically.
-- A long-only margin-maintenance scenario calculator showing current and
-  stressed equity, requirement, cushion, and the calculated market-value
-  threshold. It does not claim to predict a margin-call date.
-- Yahoo Finance chart data as the default online source.
-- Optional Twelve Data REST fallback configured through an environment variable.
-- Deterministic offline demo data for a small watchlist and five timeframes.
-- Local CSV import with validation and clear error messages.
-- Settings persistence for window geometry, chart mode, theme, price scale,
-  symbol, timeframe, indicator parameters, named watchlists, research records,
-  and margin scenario assumptions.
-- No runtime CDN, broker connection, or application backend.
-- C++ unit tests plus a Qt WebEngine startup smoke mode.
+- A desktop Strategy Lab with named strategies, up to 16 all/any entry and exit
+  conditions, completed-bar evaluation, next-open execution, commissions,
+  slippage, fractional-share control, deterministic replay, cached-watchlist
+  scanning, and optional training/holdout results.
+- Expanded backtest diagnostics: reconciled trade/equity records, drawdown,
+  exposure, MAE/MFE, holding time, CAGR, Sharpe, Sortino, Calmar,
+  buy-and-hold comparison, consecutive losses, and underwater duration.
+- Persistent local alerts for price, indicator, and strategy conditions with
+  once, once-per-bar, transition, cooldown, expiry, restart-safe state, an audit
+  history, foreground system-tray notifications, and sourced event reminders.
+- A local, multi-portfolio paper ledger with deposits, withdrawals, buys, sells,
+  dividends, fees, splits, average-cost accounting, realized/unrealized results,
+  concentration measures, event exposure, and explicit incomplete-valuation
+  state when a current market price is unavailable.
+- Manual SEC EDGAR filing and FRED macro-calendar refresh. Every imported event
+  retains its source, retrieval time, confidence, and URL. SEC requests require
+  a contact-bearing `SEC_USER_AGENT`; FRED requests require `FRED_API_KEY`.
+- A two-pane desktop comparison workspace with horizontal/vertical saved
+  layouts, independent benchmark acquisition, exact-timestamp normalized
+  relative performance, log-return correlation, synchronized visible ranges
+  and crosshairs, and symbol-scoped horizontal levels that can create crossing
+  alerts.
+- Candlestick, line, and area charts; linear, logarithmic, and percentage
+  scales; volume; light/dark themes; detailed crosshair values; and multiple
+  configurable SMA, EMA, VWAP, RSI, MACD, rolling-high/low, and Volume SMA
+  calculations.
+- Provenance-aware research targets and event calendar, optional Alpha Vantage
+  overview/earnings refresh, a transparent long-only margin stress calculator,
+  persistent named watchlists, validated CSV import/export, and a local SQLite
+  historical cache. Synthetic data is never cached as market data.
+- Yahoo Finance polled data by default, optional Twelve Data fallback, and a
+  deterministic offline mode. There is no broker connection, runtime CDN, or
+  application backend.
+- A native Qt Android application for Android 9+ using the same local chart
+  renderer, Android-native TLS, Yahoo/Twelve Data acquisition, and signed ARM64
+  packaging. The advanced desktop docks, multi-chart workspace, and tray alerts
+  are desktop features and are not represented as Android capabilities.
+- Bounded network and persistence payloads, formula-safe spreadsheet exports,
+  native and renderer tests, a Qt WebEngine smoke test, and CI packaging checks
+  for Windows and Android.
 
 ## Market-data providers
 
@@ -110,7 +108,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.5.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.8.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -129,7 +127,7 @@ Set a key before starting the application, then use the **Research** dock's
 
 ```powershell
 $env:ALPHA_VANTAGE_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.5.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.8.0-win64\tradingview_chart.exe
 ```
 
 The refresh retrieves the selected company's overview followed by its earnings
@@ -167,6 +165,27 @@ does not merge bars from different providers into one series. Review each
 provider's retention and usage terms before relying on the cache outside
 personal evaluation.
 
+### SEC CompanyFacts fundamentals
+
+The desktop **Fundamental Lab** uses the official SEC ticker map and CompanyFacts
+endpoints. Before choosing **Refresh SEC CompanyFacts**, set a contact-bearing
+identity:
+
+```powershell
+$env:SEC_USER_AGENT = 'TradingViewChart personal research your-email@example.com'
+```
+
+Accepted facts are stored locally in a separate `fundamentals.sqlite` database
+with taxonomy, tag, unit, reporting period, filing date, form, fiscal metadata,
+accession, frame, source URL, and retrieval time. The SEC identity is read from
+the process environment and is never saved. Initial population is manual to
+respect SEC access policy; the app is not a bulk EDGAR downloader.
+
+SEC CompanyFacts coverage varies by issuer and taxonomy. SEC data contains
+reported facts, not analyst estimates, consensus targets, exchange quotes, or
+recommendations. Unsupported concepts remain unavailable rather than being
+guessed.
+
 ## Technical calculations
 
 The indicator engine consumes the same validated bars shown on the chart. SMA,
@@ -178,6 +197,43 @@ and requires the slow period to be greater than the fast period.
 Warm-up values are omitted until the required number of bars exists. All
 calculations are descriptive views of historical input; they are not price
 forecasts, trading recommendations, or guarantees of future results.
+
+## Fundamental Lab assumptions
+
+Only facts filed on or before the selected as-of date are eligible. The engine
+keeps direct quarters, derives compatible cumulative Q2/Q3 values, derives Q4
+from the annual value less the first three quarters, and sums four compatible
+quarters for TTM. Reconstructed cells are marked and retain the latest
+contributing filing date. Comparative/restated facts are matched using their
+actual reporting windows rather than assuming the SEC fiscal-year field is a
+calendar year.
+
+Derived values use these definitions:
+
+```text
+free cash flow = TTM operating cash flow - abs(TTM capital expenditure)
+long-term D/E  = latest mapped long-term debt / latest equity
+ROE            = TTM net income / latest equity
+market cap     = as-of raw daily close × diluted shares
+```
+
+ROE is therefore an ending-equity screening ratio, and “debt” is the mapped
+long-term debt/lease concept rather than every possible liability. Valuation
+multiples and DCF require a provider-attributed raw daily close on or before
+the as-of date; load that symbol on the daily timeframe to seed the cache.
+Absolute peer values are compared only within the same reported unit, with no
+hidden FX conversion.
+
+The screen operates on the symbols currently present in local watchlists and
+with cached CompanyFacts. It is not a point-in-time constituent database and
+does not remove survivorship bias from a historical universe. Screen alerts
+only evaluate a current-date screen while the desktop process is running.
+
+Event studies align a supplied earnings/filing date to the first UTC trading
+date on or after it, or strictly after it when **After market close** is
+selected. They use the prior close as the return baseline and require exact
+benchmark dates for benchmark-relative results. “Abnormal return” is a
+descriptive subtraction, not proof that the event caused the move.
 
 ## Strategy Lab assumptions
 
@@ -195,11 +251,44 @@ Backtests use these conservative execution rules:
 5. force-close a final open position at the last close so final equity and the
    trade list reconcile.
 
-The first UI edits one entry condition and one exit condition. The saved model
-and engine support multiple all/any conditions for future editors. Version 0.5
-does not claim short selling, portfolio or multi-timeframe backtests,
-background/mobile notifications, dividend-adjusted performance, or broker
-execution.
+The editor supports up to 16 conditions in each all/any entry and exit group,
+and the same definition drives backtests, scans, and strategy alerts. Holdout
+mode preserves pre-split indicator warm-up but does not permit pre-split trades
+to leak into the holdout result. Version 0.7 aligns optional cached
+higher-timeframe values only after the source bar has closed and can derive
+split/total-return Yahoo views without putting adjusted values into the raw
+cache. It does not claim short selling, tax-lot optimization,
+background/mobile alert delivery, or broker execution.
+
+## Portfolio, alerts, and comparison assumptions
+
+The paper ledger is long-only and uses one base currency per portfolio. Buys
+increase an average-cost position; sells reduce that position and recognize the
+difference between sale proceeds and average cost. Cash flows, dividends, fees,
+and splits are explicit transactions. It is not a broker statement or a
+jurisdiction-specific tax-lot calculator. A portfolio remains marked
+**incomplete** until every open holding has a current non-synthetic quote.
+
+Portfolio risk uses completed raw daily cached bars with at least 20 common
+returns and the portfolio's current weights; it does not reconstruct historical
+weights. Sharpe uses a zero-percent risk-free rate. Historical VaR/CVaR is
+descriptive, XIRR requires the ending valuation to follow every external cash
+flow, and daily-close TWR is labeled approximate. Load each holding and the
+benchmark on the daily timeframe once to seed compatible cache history.
+Rebalance rows are calculations only and never create orders or transactions.
+
+Saved alerts and their audit history are local. Price/indicator/strategy alerts
+evaluate completed bars while the desktop process is running. A system-tray
+message is a foreground convenience, not a durable server or mobile push
+service. Event reminders preserve the underlying research-event source and do
+not convert estimated dates into confirmed dates.
+
+Comparison statistics use only exact common timestamps after excluding forming
+bars. Both close series are normalized to 100 at the first common bar; relative
+return is the ratio of those normalized series. Correlation is Pearson
+correlation of close-to-close log returns and is unavailable when either return
+series has zero variance. It is descriptive, sensitive to timeframe and sample
+window, and not a prediction.
 
 ## Research and margin assumptions
 
@@ -222,10 +311,24 @@ under their own agreements. Therefore the panel is a transparent stress
 scenario, not a broker feed, legal notice, or prediction of a “margin-call
 day.”
 
-SEC EDGAR and FRED are not treated as analyst-target sources. A future
-integration can use EDGAR for issuer filings and FRED for macroeconomic release
-data once issuer mapping, series selection, release calendars, provenance, and
-provider quotas are modeled explicitly.
+SEC EDGAR and FRED are not analyst-target sources. The manual EDGAR refresh maps
+the selected ticker to an SEC CIK and imports recent issuer filings. Set a
+contact-bearing identity before using filing or CompanyFacts refresh:
+
+```powershell
+$env:SEC_USER_AGENT = 'TradingViewChart personal research your-email@example.com'
+```
+
+The manual FRED refresh imports selected major macro release dates over the next
+90 days:
+
+```powershell
+$env:FRED_API_KEY = '0123456789abcdef0123456789abcdef'
+```
+
+Keys and the SEC identity are read from the process environment and are not
+stored in application settings. These calendars are informational and can be
+revised by their source.
 
 ## Watchlist CSV format
 
@@ -268,10 +371,14 @@ data rights. This repository deliberately separates:
 4. provider-independent technical calculations and summary statistics;
 5. provider-attributed SQLite historical storage;
 6. reusable strategy rules, backtesting, replay, scanning, and alert logic;
-7. research/event/target contracts and the margin scenario engine;
-8. optional research acquisition and provider-specific parsers;
-9. the Qt/WebChannel bridge; and
-10. the JavaScript chart renderer.
+7. local portfolio accounting and valuation-state contracts;
+8. research/event/target contracts and the margin scenario engine;
+9. optional research acquisition and provider-specific parsers;
+10. point-in-time SEC fact acquisition, storage, analytics, screening, and
+    event impact;
+11. exact-timestamp comparison analysis;
+12. the Qt/WebChannel bridge; and
+13. the JavaScript chart renderer.
 
 ## Windows prerequisites
 
@@ -329,7 +436,7 @@ not only the raw build output.
 ## Android APK
 
 The release page provides
-`TradingViewChart-0.5.0-android-arm64-v8a.apk` for typical modern Android
+`TradingViewChart-0.8.0-android-arm64-v8a.apk` for typical modern Android
 phones. Download it on the phone, verify its SHA-256 against the adjacent
 `.sha256` file, allow installation from the browser or file manager when
 Android prompts, and open **TradingView Chart**. Android may show a Play Protect

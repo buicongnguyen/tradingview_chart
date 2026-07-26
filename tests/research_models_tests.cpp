@@ -1,5 +1,6 @@
 #include "research/margin_risk.hpp"
 #include "research/alpha_vantage_research_parser.hpp"
+#include "research/event_intelligence_parser.hpp"
 #include "research/research_models.hpp"
 
 #include <QJsonArray>
@@ -20,11 +21,14 @@ private slots:
     void rejectsInvalidResearchSymbols();
     void roundTripsResearchWorkspace();
     void rejectsMalformedResearchWorkspaceFields();
+    void boundsResearchWorkspacePersistence();
     void importsQuotedTargetCsv();
     void boundsTargetsAndNeutralizesFormulaText();
     void parsesAlphaVantageResearch();
     void parsesAlphaVantageEarningsCalendar();
     void rejectsAlphaVantageProviderMessages();
+    void parsesSecTickerAndFilingEvents();
+    void parsesMajorFredReleaseEvents();
     void calculatesMarginScenarios();
     void rejectsInvalidMarginAssumptions();
 };
@@ -221,6 +225,27 @@ void ResearchModelsTests::rejectsMalformedResearchWorkspaceFields() {
     QVERIFY(missingCollection.error.contains(QStringLiteral("collections")));
 }
 
+void ResearchModelsTests::boundsResearchWorkspacePersistence() {
+    tvchart::ResearchWorkspace invalid{
+        .companySnapshots = {{
+            .symbol = QStringLiteral("AAPL"),
+            .provider = QString(121, u'P'),
+            .asOfUtc = 1'775'000'000,
+            .currency = QStringLiteral("USD"),
+        }},
+    };
+    QVERIFY(tvchart::serializeResearchWorkspace(invalid).isEmpty());
+
+    const auto oversized = tvchart::deserializeResearchWorkspace(
+        QByteArray(8 * 1024 * 1024 + 1, ' '));
+    QVERIFY(!oversized.ok());
+    QVERIFY(oversized.error.contains(QStringLiteral("8 MiB")));
+
+    tvchart::ResearchWorkspace tooMany;
+    tooMany.events.resize(tvchart::ResearchWorkspace::maximumEvents + 1);
+    QVERIFY(tvchart::serializeResearchWorkspace(tooMany).isEmpty());
+}
+
 void ResearchModelsTests::importsQuotedTargetCsv() {
     const auto imported = tvchart::importTargetEstimatesCsv(
         QByteArrayLiteral(
@@ -342,6 +367,97 @@ void ResearchModelsTests::rejectsAlphaVantageProviderMessages() {
             1'775'000'000);
     QVERIFY(!calendar.ok());
     QVERIFY(calendar.error.contains(QStringLiteral("Try again")));
+}
+
+void ResearchModelsTests::parsesSecTickerAndFilingEvents() {
+    const auto ticker = tvchart::EventIntelligenceParser::parseSecTickerMap(
+        R"json({
+            "0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
+            "1": {"cik_str": 789019, "ticker": "MSFT", "title": "Microsoft"}
+        })json",
+        QStringLiteral("aapl"));
+    QVERIFY2(ticker.ok(), qPrintable(ticker.error));
+    QCOMPARE(ticker.cik, QStringLiteral("0000320193"));
+    QCOMPARE(ticker.companyName, QStringLiteral("Apple Inc."));
+
+    const auto filings =
+        tvchart::EventIntelligenceParser::parseSecSubmissions(
+            R"json({
+                "cik": "0000320193",
+                "filings": {
+                    "recent": {
+                        "accessionNumber": [
+                            "0000320193-26-000001",
+                            "0000320193-26-000002"
+                        ],
+                        "filingDate": ["2026-07-24", "2026-07-23"],
+                        "reportDate": ["2026-06-30", "2026-06-30"],
+                        "form": ["10-Q", "S-8"],
+                        "primaryDocument": ["aapl-20260630.htm", "ignored.htm"]
+                    }
+                }
+            })json",
+            QStringLiteral("AAPL"),
+            ticker.cik,
+            1'800'000'000);
+    QVERIFY2(filings.ok(), qPrintable(filings.error));
+    QCOMPARE(filings.events.size(), std::size_t{1});
+    const auto& event = filings.events.front();
+    QCOMPARE(event.type, tvchart::ResearchEventType::Filing);
+    QCOMPARE(event.source, QStringLiteral("SEC EDGAR"));
+    QCOMPARE(event.confidence, tvchart::ResearchConfidence::Confirmed);
+    QVERIFY(event.detail.contains(QStringLiteral("2026-06-30")));
+    QVERIFY(event.detail.contains(QStringLiteral("sec.gov/Archives")));
+
+    const auto mismatch =
+        tvchart::EventIntelligenceParser::parseSecSubmissions(
+            R"json({"cik":"0000789019","filings":{"recent":{}}})json",
+            QStringLiteral("AAPL"),
+            ticker.cik,
+            1'800'000'000);
+    QVERIFY(!mismatch.ok());
+}
+
+void ResearchModelsTests::parsesMajorFredReleaseEvents() {
+    const auto parsed =
+        tvchart::EventIntelligenceParser::parseFredReleaseDates(
+            R"json({
+                "release_dates": [
+                    {
+                        "release_id": 10,
+                        "release_name": "Consumer Price Index",
+                        "date": "2026-08-12"
+                    },
+                    {
+                        "release_id": 999,
+                        "release_name": "Minor weekly survey",
+                        "date": "2026-08-13"
+                    },
+                    {
+                        "release_id": 53,
+                        "release_name": "Gross Domestic Product",
+                        "date": "2027-01-01"
+                    }
+                ]
+            })json",
+            1'800'000'000,
+            QDate(2026, 8, 1),
+            QDate(2026, 9, 1));
+    QVERIFY2(parsed.ok(), qPrintable(parsed.error));
+    QCOMPARE(parsed.events.size(), std::size_t{1});
+    QCOMPARE(
+        parsed.events.front().type,
+        tvchart::ResearchEventType::EconomicRelease);
+    QCOMPARE(parsed.events.front().source, QStringLiteral("FRED"));
+    QVERIFY(parsed.events.front().symbol.isEmpty());
+
+    const auto providerError =
+        tvchart::EventIntelligenceParser::parseFredReleaseDates(
+            R"json({"error_code":400,"error_message":"Bad request"})json",
+            1'800'000'000,
+            QDate(2026, 8, 1),
+            QDate(2026, 9, 1));
+    QVERIFY(!providerError.ok());
 }
 
 void ResearchModelsTests::calculatesMarginScenarios() {
