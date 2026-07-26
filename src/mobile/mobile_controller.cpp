@@ -1,5 +1,6 @@
 #include "mobile/mobile_controller.hpp"
 
+#include "analysis/market_structure_analyzer.hpp"
 #include "analysis/technical_indicators.hpp"
 #include "chart/chart_bridge.hpp"
 #include "data/demo_data_source.hpp"
@@ -128,6 +129,22 @@ MobileController::MobileController(QObject* parent)
             sendCommand(QJsonObject{
                 {QStringLiteral("type"), QStringLiteral("indicators")},
                 {QStringLiteral("calculations"), calculations},
+            });
+        });
+    connect(
+        chartBridge_,
+        &ChartBridge::marketStructureChanged,
+        this,
+        [this](const QJsonObject& structure) {
+            sendCommand(QJsonObject{
+                {
+                    QStringLiteral("type"),
+                    QStringLiteral("marketStructure"),
+                },
+                {
+                    QStringLiteral("structure"),
+                    structure,
+                },
             });
         });
     connect(chartBridge_, &ChartBridge::fitRequested, this, [this]() {
@@ -338,6 +355,14 @@ void MobileController::applySeries(
         timeframeLabel(timeframe_),
         source_,
         bars_);
+    chartBridge_->setMarketStructure(
+        analyzeMarketStructure({
+            .symbol = symbol_,
+            .bars = bars_,
+            .timeframe = timeframe_,
+            .settings = {},
+            .includeHistoricalValidation = false,
+        }));
     updateIndicator();
     emit marketSummaryChanged();
 }

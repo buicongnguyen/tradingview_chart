@@ -543,6 +543,28 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
         .asOfUtc = 1'700'000'100,
         .confidence = tvchart::ResearchConfidence::Confirmed,
     }});
+    bridge.setMarketStructure({
+        .symbol = QStringLiteral("AAPL"),
+        .timeframe = tvchart::Timeframe::FiveMinutes,
+        .barsAnalyzed = 1,
+        .asOfTimestamp = 1'700'000'000,
+        .latestClose = 102.0,
+        .zones = {{
+            .type = tvchart::StructureZoneType::Support,
+            .low = 99.0,
+            .high = 100.0,
+            .center = 99.5,
+            .touches = 2,
+            .strength = 2.0,
+            .distanceFromClosePercent = -2.45,
+            .firstAnchorTimestamp = 1'700'000'000,
+            .lastAnchorTimestamp = 1'700'000'000,
+            .detectionTimestamp = 1'700'000'000,
+            .broken = false,
+            .explanation = QStringLiteral("Confirmed support"),
+        }},
+        .bias = tvchart::StructureBias::Neutral,
+    });
     QVERIFY(bridge.setPriceLevels({{
         .id = QStringLiteral("support"),
         .symbol = QStringLiteral("AAPL"),
@@ -554,6 +576,9 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
     QSignalSpy seriesSpy(&bridge, &tvchart::ChartBridge::seriesChanged);
     QSignalSpy indicatorSpy(&bridge, &tvchart::ChartBridge::indicatorsChanged);
     QSignalSpy eventSpy(&bridge, &tvchart::ChartBridge::researchEventsChanged);
+    QSignalSpy structureSpy(
+        &bridge,
+        &tvchart::ChartBridge::marketStructureChanged);
     QSignalSpy levelSpy(&bridge, &tvchart::ChartBridge::priceLevelsChanged);
     QSignalSpy readySpy(&bridge, &tvchart::ChartBridge::ready);
 
@@ -561,6 +586,7 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
     QCOMPARE(seriesSpy.count(), 1);
     QCOMPARE(indicatorSpy.count(), 1);
     QCOMPARE(eventSpy.count(), 1);
+    QCOMPARE(structureSpy.count(), 1);
     QCOMPARE(levelSpy.count(), 1);
     QCOMPARE(readySpy.count(), 1);
     const auto firstArguments = seriesSpy.takeFirst();
@@ -581,6 +607,11 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
     QCOMPARE(
         markers.at(0).toObject().value(QStringLiteral("text")).toString(),
         QStringLiteral("SEC"));
+    const auto structure =
+        structureSpy.takeFirst().at(0).toJsonObject();
+    QCOMPARE(
+        structure.value(QStringLiteral("zones")).toArray().size(),
+        1);
     const auto levels = levelSpy.takeFirst().at(0).toJsonArray();
     QCOMPARE(levels.size(), 1);
     QCOMPARE(
@@ -601,6 +632,7 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
     QCOMPARE(seriesSpy.count(), 1);
     QCOMPARE(indicatorSpy.count(), 1);
     QCOMPARE(eventSpy.count(), 1);
+    QCOMPARE(structureSpy.count(), 1);
     QCOMPARE(levelSpy.count(), 1);
     QCOMPARE(readySpy.count(), 1);
 }

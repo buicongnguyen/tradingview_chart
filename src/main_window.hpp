@@ -38,7 +38,9 @@ class AlphaVantageResearchClient;
 class EventIntelligenceClient;
 class FundamentalStore;
 class FundamentalWorkbenchWidget;
+class MarketStructureWidget;
 class PortfolioWidget;
+class RiskContextWidget;
 class StrategyLabWidget;
 struct AlphaVantageResearchResult;
 struct EventIntelligenceResult;
@@ -86,6 +88,8 @@ private:
     void buildFundamentalDock();
     void buildMarginRiskDock();
     void buildPortfolioDock();
+    void buildRiskContextDock();
+    void buildMarketStructureDock();
     void buildStrategyLabDock();
     void restoreSettings();
     void restoreIndicatorSettings(QSettings& settings);
@@ -185,7 +189,9 @@ private:
     AlphaVantageResearchClient* researchClient_{};
     EventIntelligenceClient* eventIntelligenceClient_{};
     FundamentalWorkbenchWidget* fundamentalWidget_{};
+    MarketStructureWidget* marketStructureWidget_{};
     PortfolioWidget* portfolioWidget_{};
+    RiskContextWidget* riskContextWidget_{};
     StrategyLabWidget* strategyLab_{};
     std::unique_ptr<HistoricalDataStore> historyStore_;
     std::unique_ptr<FundamentalStore> fundamentalStore_;

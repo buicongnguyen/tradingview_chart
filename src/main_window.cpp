@@ -1,6 +1,8 @@
 #include "main_window.hpp"
 
 #include "analysis/comparison_analysis.hpp"
+#include "analysis/market_structure_widget.hpp"
+#include "analysis/risk_context_widget.hpp"
 #include "data/csv_bar_loader.hpp"
 #include "data/demo_data_source.hpp"
 #include "data/historical_data_store.hpp"
@@ -596,6 +598,8 @@ void MainWindow::buildUi() {
     buildDataStatusDock();
     buildResearchDock();
     buildFundamentalDock();
+    buildRiskContextDock();
+    buildMarketStructureDock();
     buildMarginRiskDock();
     buildPortfolioDock();
     buildStrategyLabDock();
@@ -1189,6 +1193,79 @@ void MainWindow::buildFundamentalDock() {
     refreshFundamentalUniverse();
 }
 
+void MainWindow::buildRiskContextDock() {
+    auto* dock = new QDockWidget(tr("Risk & Context"), this);
+    dock->setObjectName(QStringLiteral("riskContextDock"));
+    dock->setAllowedAreas(
+        Qt::BottomDockWidgetArea |
+        Qt::LeftDockWidgetArea |
+        Qt::RightDockWidgetArea);
+    riskContextWidget_ = new RiskContextWidget(
+        historyStore_.get(),
+        fundamentalStore_.get(),
+        dock);
+    riskContextWidget_->setObjectName(
+        QStringLiteral("riskContextWidget"));
+    dock->setWidget(riskContextWidget_);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    connect(
+        riskContextWidget_,
+        &RiskContextWidget::statusMessage,
+        this,
+        [this](const QString& message) {
+            statusBar()->showMessage(message, 15'000);
+        });
+    connect(
+        riskContextWidget_,
+        &RiskContextWidget::settingsChanged,
+        this,
+        &MainWindow::saveSettingsNow);
+    if (auto* fundamentalDock =
+            findChild<QDockWidget*>(QStringLiteral("fundamentalDock"))) {
+        tabifyDockWidget(fundamentalDock, dock);
+    }
+}
+
+void MainWindow::buildMarketStructureDock() {
+    auto* dock = new QDockWidget(tr("Market Structure"), this);
+    dock->setObjectName(
+        QStringLiteral("marketStructureDock"));
+    dock->setAllowedAreas(
+        Qt::BottomDockWidgetArea |
+        Qt::LeftDockWidgetArea |
+        Qt::RightDockWidgetArea);
+    marketStructureWidget_ =
+        new MarketStructureWidget(dock);
+    marketStructureWidget_->setObjectName(
+        QStringLiteral("marketStructureWidget"));
+    dock->setWidget(marketStructureWidget_);
+    addDockWidget(Qt::RightDockWidgetArea, dock);
+    connect(
+        marketStructureWidget_,
+        &MarketStructureWidget::reportChanged,
+        this,
+        [this] {
+            chartView_->bridge()->setMarketStructure(
+                marketStructureWidget_->report());
+        });
+    connect(
+        marketStructureWidget_,
+        &MarketStructureWidget::statusMessage,
+        this,
+        [this](const QString& message) {
+            statusBar()->showMessage(message, 15'000);
+        });
+    connect(
+        marketStructureWidget_,
+        &MarketStructureWidget::settingsChanged,
+        this,
+        &MainWindow::saveSettingsNow);
+    if (auto* riskDock = findChild<QDockWidget*>(
+            QStringLiteral("riskContextDock"))) {
+        tabifyDockWidget(riskDock, dock);
+    }
+}
+
 void MainWindow::buildMarginRiskDock() {
     auto* dock = new QDockWidget(tr("Margin risk scenario"), this);
     dock->setObjectName(QStringLiteral("marginRiskDock"));
@@ -1523,6 +1600,12 @@ void MainWindow::restoreSettings() {
     if (fundamentalWidget_) {
         fundamentalWidget_->restoreSettings(settings);
     }
+    if (riskContextWidget_) {
+        riskContextWidget_->restoreSettings(settings);
+    }
+    if (marketStructureWidget_) {
+        marketStructureWidget_->restoreSettings(settings);
+    }
 }
 
 void MainWindow::restoreIndicatorSettings(QSettings& settings) {
@@ -1690,6 +1773,12 @@ void MainWindow::saveSettings() const {
     }
     if (fundamentalWidget_) {
         fundamentalWidget_->saveSettings(settings);
+    }
+    if (riskContextWidget_) {
+        riskContextWidget_->saveSettings(settings);
+    }
+    if (marketStructureWidget_) {
+        marketStructureWidget_->saveSettings(settings);
     }
 }
 
@@ -1866,6 +1955,15 @@ bool MainWindow::applySeries(
     if (fundamentalWidget_) {
         fundamentalWidget_->setCurrentContext(
             currentSeriesSymbol_,
+            currentBars_);
+    }
+    if (riskContextWidget_) {
+        riskContextWidget_->setCurrentContext(currentSeriesSymbol_);
+    }
+    if (marketStructureWidget_) {
+        marketStructureWidget_->setCurrentContext(
+            currentSeriesSymbol_,
+            activeTimeframe(),
             currentBars_);
     }
     refreshResearchDisplay();
@@ -3295,6 +3393,9 @@ void MainWindow::refreshResearchDisplay() {
     if (fundamentalWidget_) {
         fundamentalWidget_->setResearchWorkspace(researchWorkspace_);
     }
+    if (riskContextWidget_) {
+        riskContextWidget_->setResearchWorkspace(researchWorkspace_);
+    }
 }
 
 void MainWindow::addTargetEstimate() {
@@ -3896,7 +3997,7 @@ void MainWindow::showAbout() {
     dialog.setMinimumWidth(560);
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
-        tr("<h2>TradingView Chart 0.8.0</h2>"
+        tr("<h2>TradingView Chart 1.0.0</h2>"
            "<p>A C++/Qt market chart viewer with online and offline sources.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "

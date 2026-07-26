@@ -12,7 +12,7 @@ int main(int argc, char* argv[]) {
     QGuiApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("buicongnguyen"));
     QCoreApplication::setApplicationName(QStringLiteral("TradingViewChart"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.8.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("1.0.0"));
 
     tvchart::MobileController controller;
     QQmlApplicationEngine engine;

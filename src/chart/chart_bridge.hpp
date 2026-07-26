@@ -1,5 +1,6 @@
 #pragma once
 
+#include "analysis/market_structure_analyzer.hpp"
 #include "analysis/technical_indicators.hpp"
 #include "domain/bar.hpp"
 #include "research/research_models.hpp"
@@ -33,6 +34,7 @@ public:
     void setPriceScaleMode(QString mode);
     void setIndicators(std::vector<IndicatorCalculation> calculations);
     void setResearchEvents(std::vector<ResearchEvent> events);
+    void setMarketStructure(MarketStructureReport report);
     bool setPriceLevels(std::vector<ChartPriceLevel> levels);
     void setVisibleRange(std::int64_t from, std::int64_t to);
     void setCrosshairTime(std::int64_t timestamp);
@@ -56,6 +58,7 @@ signals:
     void priceScaleModeChanged(const QString& mode);
     void indicatorsChanged(const QJsonArray& calculations);
     void researchEventsChanged(const QJsonArray& events);
+    void marketStructureChanged(const QJsonObject& structure);
     void priceLevelsChanged(const QJsonArray& levels);
     void visibleRangeChanged(qint64 from, qint64 to);
     void crosshairTimeChanged(qint64 timestamp);
@@ -73,6 +76,7 @@ private:
     [[nodiscard]] static QJsonObject indicatorToJson(
         const IndicatorCalculation& calculation);
     [[nodiscard]] QJsonArray researchEventsToJson() const;
+    [[nodiscard]] QJsonObject marketStructureToJson() const;
     [[nodiscard]] QJsonArray priceLevelsToJson() const;
 
     QString symbol_;
@@ -83,6 +87,7 @@ private:
     Bars bars_;
     std::vector<IndicatorCalculation> indicators_;
     std::vector<ResearchEvent> researchEvents_;
+    MarketStructureReport marketStructure_;
     std::vector<ChartPriceLevel> priceLevels_;
     bool dark_{true};
     bool ready_{false};

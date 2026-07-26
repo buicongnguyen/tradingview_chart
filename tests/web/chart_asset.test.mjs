@@ -32,6 +32,7 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /bridge\.seriesChanged\.connect/);
   assert.match(source, /bridge\.indicatorsChanged\.connect/);
   assert.match(source, /bridge\.researchEventsChanged\.connect/);
+  assert.match(source, /bridge\.marketStructureChanged\.connect/);
   assert.match(source, /bridge\.priceLevelsChanged\.connect/);
   assert.match(source, /bridge\.visibleRangeChanged\.connect/);
   assert.match(source, /bridge\.crosshairTimeChanged\.connect/);
@@ -47,6 +48,9 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /LightweightCharts\.HistogramSeries/);
   assert.match(source, /LightweightCharts\.createSeriesMarkers/);
   assert.match(source, /priceSeries\.createPriceLine/);
+  assert.match(source, /priceSeries\.attachPrimitive/);
+  assert.match(source, /class MarketStructurePrimitive/);
+  assert.match(source, /useMediaCoordinateSpace/);
   assert.match(source, /subscribeVisibleTimeRangeChange/);
   assert.match(source, /chart\.setCrosshairPosition/);
   assert.match(source, /chart\.removePane/);

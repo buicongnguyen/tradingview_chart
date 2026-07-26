@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradingViewChart VERSION 0.8.0 LANGUAGES CXX)
+project(TradingViewChart VERSION 1.0.0 LANGUAGES CXX)
 
 option(
     TRADINGVIEW_CHART_BUILD_TESTS
@@ -26,6 +26,10 @@ endif()
 add_library(tradingview_chart_core
     src/analysis/comparison_analysis.cpp
     src/analysis/comparison_analysis.hpp
+    src/analysis/market_structure_analyzer.cpp
+    src/analysis/market_structure_analyzer.hpp
+    src/analysis/risk_context_analyzer.cpp
+    src/analysis/risk_context_analyzer.hpp
     src/analysis/technical_indicators.cpp
     src/analysis/technical_indicators.hpp
     src/chart/chart_bridge.cpp
@@ -182,7 +186,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${android_package_dir}"
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 36
-        QT_ANDROID_VERSION_CODE 800
+        QT_ANDROID_VERSION_CODE 1000
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
     )
 
@@ -198,6 +202,10 @@ else()
         src/main.cpp
         src/main_window.cpp
         src/main_window.hpp
+        src/analysis/market_structure_widget.cpp
+        src/analysis/market_structure_widget.hpp
+        src/analysis/risk_context_widget.cpp
+        src/analysis/risk_context_widget.hpp
         src/chart/chart_view.cpp
         src/chart/chart_view.hpp
         src/data/market_data_client.cpp
@@ -356,6 +364,32 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         COMMAND tradingview_chart_fundamental_tests
     )
 
+    add_executable(tradingview_chart_risk_context_tests
+        tests/risk_context_analyzer_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_risk_context_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_risk_context_tests
+        COMMAND tradingview_chart_risk_context_tests
+    )
+
+    add_executable(tradingview_chart_market_structure_tests
+        tests/market_structure_analyzer_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_market_structure_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_market_structure_tests
+        COMMAND tradingview_chart_market_structure_tests
+    )
+
     set_tests_properties(
         tradingview_chart_tests
         tradingview_chart_indicator_tests
@@ -366,6 +400,8 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         tradingview_chart_portfolio_tests
         tradingview_chart_comparison_tests
         tradingview_chart_fundamental_tests
+        tradingview_chart_risk_context_tests
+        tradingview_chart_market_structure_tests
         PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QSQLiteDriverPlugin>/.."

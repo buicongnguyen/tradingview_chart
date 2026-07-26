@@ -31,6 +31,7 @@ bool ChartBridge::setSeries(
     if (ready_) {
         emit seriesChanged(symbol_, timeframe_, source_, toJson(bars_));
         emit researchEventsChanged(researchEventsToJson());
+        emit marketStructureChanged(marketStructureToJson());
         emit priceLevelsChanged(priceLevelsToJson());
     }
     return true;
@@ -81,6 +82,13 @@ void ChartBridge::setResearchEvents(std::vector<ResearchEvent> events) {
     researchEvents_ = std::move(events);
     if (ready_) {
         emit researchEventsChanged(researchEventsToJson());
+    }
+}
+
+void ChartBridge::setMarketStructure(MarketStructureReport report) {
+    marketStructure_ = std::move(report);
+    if (ready_) {
+        emit marketStructureChanged(marketStructureToJson());
     }
 }
 
@@ -188,6 +196,7 @@ void ChartBridge::publishState() {
     }
     emit indicatorsChanged(toJson(indicators_));
     emit researchEventsChanged(researchEventsToJson());
+    emit marketStructureChanged(marketStructureToJson());
     emit priceLevelsChanged(priceLevelsToJson());
 }
 
@@ -314,6 +323,141 @@ QJsonArray ChartBridge::researchEventsToJson() const {
         });
     }
     return output;
+}
+
+QJsonObject ChartBridge::marketStructureToJson() const {
+    QJsonArray zones;
+    QJsonArray lines;
+    constexpr auto maximumStructures = std::size_t{16};
+    constexpr auto maximumZones = std::size_t{8};
+    if (!marketStructure_.ok() || bars_.empty() ||
+        marketStructure_.symbol.compare(
+            symbol_.trimmed(),
+            Qt::CaseInsensitive) != 0) {
+        return {
+            {QStringLiteral("zones"), zones},
+            {QStringLiteral("lines"), lines},
+        };
+    }
+
+    const auto firstTimestamp = bars_.front().timestamp;
+    const auto lastTimestamp = bars_.back().timestamp;
+    for (const auto& zone : marketStructure_.zones) {
+        if (zones.size() >= static_cast<qsizetype>(maximumZones) ||
+            zone.broken || !std::isfinite(zone.low) ||
+            !std::isfinite(zone.high) || zone.low <= 0.0 ||
+            zone.high < zone.low ||
+            zone.detectionTimestamp > lastTimestamp) {
+            continue;
+        }
+        const auto support =
+            zone.type == StructureZoneType::Support;
+        zones.append(QJsonObject{
+            {
+                QStringLiteral("start"),
+                static_cast<qint64>(
+                    std::max(
+                        firstTimestamp,
+                        zone.detectionTimestamp)),
+            },
+            {
+                QStringLiteral("end"),
+                static_cast<qint64>(lastTimestamp),
+            },
+            {QStringLiteral("low"), zone.low},
+            {QStringLiteral("high"), zone.high},
+            {
+                QStringLiteral("color"),
+                support
+                    ? QStringLiteral("#26a69a")
+                    : QStringLiteral("#ef5350"),
+            },
+            {
+                QStringLiteral("title"),
+                QStringLiteral("%1 · %2 touches")
+                    .arg(
+                        structureZoneTypeLabel(zone.type),
+                        QString::number(zone.touches)),
+            },
+        });
+    }
+
+    const auto appendLine =
+        [&lines, firstTimestamp, lastTimestamp](
+            const StructureLine& line,
+            QString title = {}) {
+            if (lines.size() + 1 >
+                    static_cast<qsizetype>(maximumStructures) ||
+                !std::isfinite(line.startPrice) ||
+                !std::isfinite(line.endPrice) ||
+                line.startPrice <= 0.0 || line.endPrice <= 0.0 ||
+                line.endTimestamp <= line.startTimestamp ||
+                line.endTimestamp < firstTimestamp ||
+                line.startTimestamp > lastTimestamp) {
+                return;
+            }
+            if (title.isEmpty()) {
+                title = line.title;
+            }
+            lines.append(QJsonObject{
+                {
+                    QStringLiteral("start"),
+                    static_cast<qint64>(
+                        std::max(
+                            firstTimestamp,
+                            line.startTimestamp)),
+                },
+                {
+                    QStringLiteral("end"),
+                    static_cast<qint64>(
+                        std::min(
+                            lastTimestamp,
+                            line.endTimestamp)),
+                },
+                {QStringLiteral("startPrice"), line.startPrice},
+                {QStringLiteral("endPrice"), line.endPrice},
+                {
+                    QStringLiteral("color"),
+                    line.color.isEmpty()
+                        ? QStringLiteral("#2962ff")
+                        : line.color,
+                },
+                {QStringLiteral("title"), std::move(title)},
+                {QStringLiteral("dashed"), line.dashed},
+            });
+        };
+    for (const auto& line : marketStructure_.lines) {
+        if (zones.size() + lines.size() >=
+            static_cast<qsizetype>(maximumStructures)) {
+            break;
+        }
+        appendLine(line);
+    }
+    for (auto pattern = marketStructure_.patterns.rbegin();
+         pattern != marketStructure_.patterns.rend() &&
+         zones.size() + lines.size() <
+             static_cast<qsizetype>(maximumStructures);
+         ++pattern) {
+        if (pattern->status == PatternStatus::Invalidated) {
+            continue;
+        }
+        for (const auto& boundary : pattern->boundaries) {
+            appendLine(
+                boundary,
+                QStringLiteral("%1 · %2")
+                    .arg(
+                        patternKindLabel(pattern->kind),
+                        patternStatusLabel(pattern->status)));
+            if (zones.size() + lines.size() >=
+                static_cast<qsizetype>(maximumStructures)) {
+                break;
+            }
+        }
+    }
+    return {
+        {QStringLiteral("zones"), zones},
+        {QStringLiteral("lines"), lines},
+    };
 }
 
 QJsonArray ChartBridge::priceLevelsToJson() const {
