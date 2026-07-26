@@ -51,6 +51,10 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /priceSeries\.attachPrimitive/);
   assert.match(source, /class MarketStructurePrimitive/);
   assert.match(source, /useMediaCoordinateSpace/);
+  assert.match(source, /const maximumOverlayLabels\s*=\s*6/);
+  assert.match(source, /function drawOverlayLabels/);
+  assert.match(source, /identities\.has\(candidate\.title\)/);
+  assert.match(source, /const overlaps\s*=\s*placed\.some/);
   assert.match(source, /subscribeVisibleTimeRangeChange/);
   assert.match(source, /chart\.setCrosshairPosition/);
   assert.match(source, /chart\.removePane/);

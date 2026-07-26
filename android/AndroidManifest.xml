@@ -30,7 +30,7 @@
         android:fullBackupOnly="false"
         android:hardwareAccelerated="true"
         android:icon="@drawable/ic_launcher"
-        android:label="TradingView Chart"
+        android:label="TradeChart Lab"
         android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/TradingViewChartTheme"
         android:usesCleartextTraffic="false">

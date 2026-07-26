@@ -54,8 +54,8 @@ jobs:
       - name: Upload tested Windows package
         uses: actions/upload-artifact@v4
         with:
-          name: TradingViewChart-1.0.0-win64
+          name: TradeChartLab-1.1.0-win64
           path: |
-            dist/TradingViewChart-1.0.0-win64.zip
-            dist/TradingViewChart-1.0.0-win64.zip.sha256
+            dist/TradeChartLab-1.1.0-win64.zip
+            dist/TradeChartLab-1.1.0-win64.zip.sha256
           if-no-files-found: error

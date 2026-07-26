@@ -2,7 +2,9 @@
 param(
     [ValidateSet('Release')]
     [string]$Configuration = 'Release',
-    [string]$QtRoot = ''
+    [string]$QtRoot = '',
+    [ValidatePattern('^[A-Za-z0-9._-]+$')]
+    [string]$PackageName = 'TradeChartLab-1.1.0-win64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +15,7 @@ if ([string]::IsNullOrWhiteSpace($QtRoot)) {
 }
 $buildDirectory = Join-Path $repositoryRoot 'build-release'
 $distRoot = Join-Path $repositoryRoot 'dist'
-$stage = Join-Path $distRoot 'TradingViewChart-1.0.0-win64'
+$stage = Join-Path $distRoot $PackageName
 $archive = "$stage.zip"
 
 & (Join-Path $PSScriptRoot 'configure-windows.ps1') `
@@ -131,16 +133,28 @@ foreach ($relativePath in $requiredRuntimeFiles) {
 
 $originalSmokePath = $env:PATH
 $originalChromiumFlags = $env:QTWEBENGINE_CHROMIUM_FLAGS
+$originalQtOpenGl = $env:QT_OPENGL
+$originalQtQuickBackend = $env:QT_QUICK_BACKEND
 try {
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
-    $env:QTWEBENGINE_CHROMIUM_FLAGS = '--disable-gpu --no-sandbox'
-    & (Join-Path $stage 'tradingview_chart.exe') --smoke-test
-    if ($LASTEXITCODE -ne 0) {
-        throw "The deployed application smoke test failed with exit code $LASTEXITCODE."
+    $env:QTWEBENGINE_CHROMIUM_FLAGS =
+        '--disable-gpu --disable-gpu-compositing --no-sandbox'
+    $env:QT_OPENGL = 'software'
+    $env:QT_QUICK_BACKEND = 'software'
+    $smokeProcess = Start-Process `
+        -FilePath (Join-Path $stage 'tradingview_chart.exe') `
+        -ArgumentList '--smoke-test' `
+        -WindowStyle Hidden `
+        -Wait `
+        -PassThru
+    if ($smokeProcess.ExitCode -ne 0) {
+        throw "The deployed application smoke test failed with exit code $($smokeProcess.ExitCode)."
     }
 } finally {
     $env:PATH = $originalSmokePath
     $env:QTWEBENGINE_CHROMIUM_FLAGS = $originalChromiumFlags
+    $env:QT_OPENGL = $originalQtOpenGl
+    $env:QT_QUICK_BACKEND = $originalQtQuickBackend
 }
 
 Compress-Archive -LiteralPath $stage -DestinationPath $archive -CompressionLevel Optimal

@@ -10,7 +10,7 @@ ApplicationWindow {
     width: 430
     height: 860
     visible: true
-    title: qsTr("TradingView Chart")
+    title: qsTr("TradeChart Lab")
     color: Material.background
 
     Material.theme: darkTheme.checked ? Material.Dark : Material.Light
@@ -37,7 +37,7 @@ ApplicationWindow {
                 anchors.rightMargin: 8
 
                 Label {
-                    text: qsTr("TradingView Chart")
+                    text: qsTr("TradeChart Lab")
                     font.pixelSize: 20
                     font.bold: true
                     Layout.fillWidth: true

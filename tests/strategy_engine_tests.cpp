@@ -1,12 +1,19 @@
+#include "strategy/pine_strategy_importer.hpp"
 #include "strategy/replay_session.hpp"
 #include "strategy/strategy_engine.hpp"
 #include "strategy/strategy_models.hpp"
+#include "strategy/theory_validation.hpp"
+#include "strategy/trading_simulation.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTest>
 
+#include <array>
 #include <cmath>
+#include <iterator>
+#include <utility>
+#include <vector>
 
 class StrategyEngineTests final : public QObject {
     Q_OBJECT
@@ -29,6 +36,12 @@ private slots:
     void enforcesAlertFrequencyExpiryAndPersistence();
     void replaysWithinDeterministicBoundaries();
     void excludesAStillFormingProviderBar();
+    void validatesTheoriesPointInTimeWithoutLookAhead();
+    void appliesTheoryCostsAndRejectsInvalidAssumptions();
+    void keepsTheoryEpisodesNonOverlappingAndHoldoutChronological();
+    void simulatesNextOpenOrdersAcrossInteractionModes();
+    void restoresSimulationSnapshotsDeterministically();
+    void importsSafePineSubsetAndRejectsUnsupportedSemantics();
 };
 
 namespace {
@@ -78,6 +91,58 @@ namespace {
             }},
         },
     };
+}
+
+[[nodiscard]] tvchart::Bars theoryBars(
+    const std::size_t cycles) {
+    constexpr std::array closes{
+        90.0,
+        101.0,
+        102.0,
+        103.0,
+        104.0,
+        105.0,
+        106.0,
+        99.0,
+        98.0,
+        97.0,
+        96.0,
+        95.0,
+        94.0,
+    };
+    tvchart::Bars bars;
+    bars.reserve(cycles * closes.size());
+    for (std::size_t cycle = 0; cycle < cycles; ++cycle) {
+        for (std::size_t offset = 0;
+             offset < closes.size();
+             ++offset) {
+            const auto index =
+                cycle * closes.size() + offset;
+            bars.push_back(bar(
+                1'700'000'000 +
+                    static_cast<std::int64_t>(index) * 86'400,
+                closes[offset],
+                closes[offset]));
+        }
+    }
+    return bars;
+}
+
+[[nodiscard]] tvchart::StrategyDefinition theory(
+    QString id,
+    QString name,
+    const tvchart::StrategyComparison entryComparison) {
+    auto result = crossingStrategy();
+    result.id = std::move(id);
+    result.name = std::move(name);
+    result.entry.conditions.front().comparison = entryComparison;
+    result.exit.conditions.front().comparison =
+        entryComparison == tvchart::StrategyComparison::CrossesAbove
+            ? tvchart::StrategyComparison::CrossesBelow
+            : tvchart::StrategyComparison::CrossesAbove;
+    result.entry.conditions.front().constant = 100.0;
+    result.exit.conditions.front().constant = 100.0;
+    return result;
 }
 
 } // namespace
@@ -723,6 +788,609 @@ void StrategyEngineTests::excludesAStillFormingProviderBar() {
             tvchart::Timeframe::FiveMinutes,
             finalStart + 300),
         bars.size());
+}
+
+void StrategyEngineTests::validatesTheoriesPointInTimeWithoutLookAhead() {
+    const auto bars = theoryBars(60);
+    constexpr auto barsPerCycle = std::size_t{13};
+    const auto selectedIndex = 50 * barsPerCycle + 1;
+    const auto selectedTimestamp = bars[selectedIndex].timestamp;
+    const std::vector theories{
+        theory(
+            QStringLiteral("profitable"),
+            QStringLiteral("Profitable cross"),
+            tvchart::StrategyComparison::CrossesAbove),
+        theory(
+            QStringLiteral("unprofitable"),
+            QStringLiteral("Unprofitable cross"),
+            tvchart::StrategyComparison::CrossesBelow),
+    };
+    const tvchart::TheoryValidationInput input{
+        .symbol = QStringLiteral("TEST"),
+        .bars = bars,
+        .primaryTimeframe = tvchart::Timeframe::OneDay,
+        .theories = theories,
+        .analysisThroughTimestamp = selectedTimestamp,
+        .shortHorizonBars = 2,
+        .longHorizonBars = 5,
+        .holdoutPercent = 30.0,
+        .minimumSamples = 10,
+    };
+    const auto full = tvchart::validateTheories(input);
+    QVERIFY2(full.ok(), qPrintable(full.error));
+    QCOMPARE(full.asOfTimestamp, selectedTimestamp);
+    QCOMPARE(full.barsAnalyzed, selectedIndex + 1);
+    QCOMPARE(full.results.size(), std::size_t{2});
+    QCOMPARE(full.recommendedTheoryId, QStringLiteral("profitable"));
+
+    const auto& profitable = full.results.front();
+    QVERIFY(profitable.evaluationAvailable);
+    QVERIFY(profitable.matchesAtAsOf);
+    QCOMPARE(profitable.longHorizon.samples, std::size_t{50});
+    QCOMPARE(profitable.longHorizon.positiveOutcomes, std::size_t{50});
+    QCOMPARE(
+        profitable.evidence,
+        tvchart::TheoryEvidence::Positive);
+    QCOMPARE(
+        profitable.reliability,
+        tvchart::TheoryReliability::Low);
+    QVERIFY(profitable.longHorizon.holdoutSamples >= 8);
+    QVERIFY(
+        profitable.longHorizon.holdoutConfidenceLowerPercent >= 0.0);
+    QVERIFY(
+        profitable.longHorizon.holdoutConfidenceUpperPercent <= 100.0);
+
+    const auto& unprofitable = full.results.back();
+    QVERIFY(!unprofitable.matchesAtAsOf);
+    QCOMPARE(
+        unprofitable.evidence,
+        tvchart::TheoryEvidence::Negative);
+
+    auto prefixInput = input;
+    prefixInput.bars = {
+        bars.begin(),
+        std::next(
+            bars.begin(),
+            static_cast<std::ptrdiff_t>(selectedIndex + 1)),
+    };
+    const auto prefix = tvchart::validateTheories(prefixInput);
+    QVERIFY2(prefix.ok(), qPrintable(prefix.error));
+    QCOMPARE(prefix.results.size(), full.results.size());
+    for (std::size_t index = 0;
+         index < full.results.size();
+         ++index) {
+        QCOMPARE(
+            prefix.results[index].longHorizon.samples,
+            full.results[index].longHorizon.samples);
+        QCOMPARE(
+            prefix.results[index].longHorizon.averageReturnPercent,
+            full.results[index].longHorizon.averageReturnPercent);
+        QCOMPARE(
+            prefix.results[index].longHorizon.holdoutHitRatePercent,
+            full.results[index].longHorizon.holdoutHitRatePercent);
+        QCOMPARE(
+            prefix.results[index].evidence,
+            full.results[index].evidence);
+    }
+}
+
+void StrategyEngineTests::appliesTheoryCostsAndRejectsInvalidAssumptions() {
+    const auto bars = theoryBars(20);
+    tvchart::TheoryValidationInput input{
+        .symbol = QStringLiteral("TEST"),
+        .bars = bars,
+        .primaryTimeframe = tvchart::Timeframe::OneDay,
+        .theories = {
+            theory(
+                QStringLiteral("profitable"),
+                QStringLiteral("Profitable cross"),
+                tvchart::StrategyComparison::CrossesAbove),
+        },
+        .analysisThroughTimestamp = bars.back().timestamp,
+        .shortHorizonBars = 2,
+        .longHorizonBars = 5,
+        .holdoutPercent = 30.0,
+        .minimumSamples = 10,
+    };
+    const auto withoutCosts = tvchart::validateTheories(input);
+    QVERIFY2(withoutCosts.ok(), qPrintable(withoutCosts.error));
+    input.roundTripCostBasisPoints = 100.0;
+    const auto withCosts = tvchart::validateTheories(input);
+    QVERIFY2(withCosts.ok(), qPrintable(withCosts.error));
+    QVERIFY(
+        withCosts.results.front().longHorizon.averageReturnPercent <
+        withoutCosts.results.front().longHorizon.averageReturnPercent);
+
+    input.holdoutPercent = 5.0;
+    const auto invalid = tvchart::validateTheories(input);
+    QVERIFY(!invalid.ok());
+    QVERIFY(invalid.error.contains(QStringLiteral("assumptions")));
+}
+
+void StrategyEngineTests::
+keepsTheoryEpisodesNonOverlappingAndHoldoutChronological() {
+    tvchart::Bars frequentSignals;
+    constexpr std::array frequentCloses{
+        90.0,
+        101.0,
+        102.0,
+        90.0,
+    };
+    for (std::size_t index = 0; index < 40; ++index) {
+        const auto close =
+            frequentCloses[index % frequentCloses.size()];
+        frequentSignals.push_back(bar(
+            1'700'000'000 +
+                static_cast<std::int64_t>(index) * 86'400,
+            close,
+            close));
+    }
+    auto input = tvchart::TheoryValidationInput{
+        .symbol = QStringLiteral("TEST"),
+        .bars = frequentSignals,
+        .primaryTimeframe = tvchart::Timeframe::OneDay,
+        .theories = {
+            theory(
+                QStringLiteral("frequent"),
+                QStringLiteral("Frequent cross"),
+                tvchart::StrategyComparison::CrossesAbove),
+        },
+        .analysisThroughTimestamp =
+            frequentSignals.back().timestamp,
+        .shortHorizonBars = 2,
+        .longHorizonBars = 5,
+        .holdoutPercent = 30.0,
+        .minimumSamples = 10,
+    };
+    const auto nonOverlapping = tvchart::validateTheories(input);
+    QVERIFY2(
+        nonOverlapping.ok(),
+        qPrintable(nonOverlapping.error));
+    QCOMPARE(
+        nonOverlapping.results.front().longHorizon.samples,
+        std::size_t{5});
+
+    tvchart::Bars chronological;
+    constexpr std::array positiveCycle{
+        90.0,
+        101.0,
+        102.0,
+        103.0,
+        104.0,
+        105.0,
+        106.0,
+        99.0,
+        98.0,
+        97.0,
+        96.0,
+        95.0,
+        94.0,
+    };
+    constexpr std::array negativeCycle{
+        90.0,
+        101.0,
+        99.0,
+        98.0,
+        97.0,
+        96.0,
+        95.0,
+        94.0,
+        93.0,
+        92.0,
+        91.0,
+        90.0,
+        89.0,
+    };
+    for (std::size_t cycle = 0; cycle < 10; ++cycle) {
+        const auto& closes =
+            cycle < 7 ? positiveCycle : negativeCycle;
+        for (const auto close : closes) {
+            chronological.push_back(bar(
+                1'800'000'000 +
+                    static_cast<std::int64_t>(
+                        chronological.size()) *
+                        86'400,
+                close,
+                close));
+        }
+    }
+    input.bars = chronological;
+    input.analysisThroughTimestamp =
+        chronological.back().timestamp;
+    const auto chronologicalReport =
+        tvchart::validateTheories(input);
+    QVERIFY2(
+        chronologicalReport.ok(),
+        qPrintable(chronologicalReport.error));
+    const auto& metrics =
+        chronologicalReport.results.front().longHorizon;
+    QCOMPARE(metrics.samples, std::size_t{10});
+    QCOMPARE(metrics.trainingSamples, std::size_t{7});
+    QCOMPARE(metrics.holdoutSamples, std::size_t{3});
+    QVERIFY(metrics.trainingAverageReturnPercent > 0.0);
+    QVERIFY(metrics.holdoutAverageReturnPercent < 0.0);
+}
+
+void StrategyEngineTests::
+simulatesNextOpenOrdersAcrossInteractionModes() {
+    const auto bars = sampleBars();
+    const tvchart::SimulationConfig automaticConfig{
+        .strategy = crossingStrategy(),
+        .execution = {
+            .initialCapital = 1'000.0,
+            .allocationPercent = 100.0,
+            .commissionPerSide = 1.0,
+            .slippageBasisPoints = 100.0,
+        },
+        .mode = tvchart::SimulationMode::Automatic,
+        .startIndex = 1,
+    };
+    tvchart::TradingSimulationSession automatic;
+    auto error = automatic.reset(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        {},
+        automaticConfig);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        automatic.account().pendingAction,
+        tvchart::SimulationAction::None);
+
+    error = automatic.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        automatic.account().currentTimestamp,
+        bars[2].timestamp);
+    QCOMPARE(
+        automatic.account().pendingAction,
+        tvchart::SimulationAction::Enter);
+    QCOMPARE(automatic.account().quantity, 0.0);
+
+    const tvchart::Bars prefix(
+        bars.cbegin(),
+        bars.cbegin() + 4);
+    tvchart::TradingSimulationSession withoutFutureBars;
+    error = withoutFutureBars.reset(
+        prefix,
+        tvchart::Timeframe::FiveMinutes,
+        {},
+        automaticConfig);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = withoutFutureBars.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        withoutFutureBars.account().pendingAction,
+        automatic.account().pendingAction);
+    QCOMPARE(
+        withoutFutureBars.account().ruleDetail,
+        automatic.account().ruleDetail);
+    QCOMPARE(
+        withoutFutureBars.account().equity,
+        automatic.account().equity);
+
+    error = automatic.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(automatic.account().quantity > 0.0);
+    QCOMPARE(automatic.account().entryPrice, 12.12);
+    QCOMPARE(
+        automatic.account().currentTimestamp,
+        bars[3].timestamp);
+
+    error = automatic.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        automatic.account().pendingAction,
+        tvchart::SimulationAction::Exit);
+    error = automatic.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(automatic.trades().size(), std::size_t{1});
+    QCOMPARE(
+        automatic.trades().front().entryTimestamp,
+        bars[3].timestamp);
+    QCOMPARE(
+        automatic.trades().front().exitTimestamp,
+        bars[5].timestamp);
+    QCOMPARE(automatic.trades().front().entryPrice, 12.12);
+    QCOMPARE(automatic.trades().front().exitPrice, 5.94);
+    QCOMPARE(automatic.account().quantity, 0.0);
+    QVERIFY(automatic.account().finished);
+    QVERIFY(std::abs(
+                automatic.account().equity -
+                automatic.account().cash) <
+            1.0e-9);
+    QVERIFY(std::abs(
+                automatic.account().equity -
+                automatic.account().initialCapital -
+                automatic.account().realizedProfitLoss -
+                automatic.account().unrealizedProfitLoss) <
+            1.0e-9);
+
+    auto manualConfig = automaticConfig;
+    manualConfig.mode = tvchart::SimulationMode::Manual;
+    manualConfig.startIndex = 2;
+    manualConfig.execution.slippageBasisPoints = 0.0;
+    tvchart::TradingSimulationSession manual;
+    error = manual.reset(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        {},
+        manualConfig);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        manual.account().pendingAction,
+        tvchart::SimulationAction::None);
+    error = manual.requestManualAction(
+        tvchart::SimulationAction::Enter);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = manual.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(manual.account().quantity > 0.0);
+    QCOMPARE(manual.account().entryPrice, bars[3].open);
+
+    auto assistedConfig = manualConfig;
+    assistedConfig.mode = tvchart::SimulationMode::Assisted;
+    tvchart::TradingSimulationSession expires;
+    error = expires.reset(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        {},
+        assistedConfig);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        expires.account().proposedAction,
+        tvchart::SimulationAction::Enter);
+    QVERIFY(!expires
+                 .requestManualAction(
+                     tvchart::SimulationAction::Enter)
+                 .isEmpty());
+    error = expires.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(expires.account().quantity, 0.0);
+    QVERIFY(std::ranges::any_of(
+        expires.decisions(),
+        [](const tvchart::SimulationDecision& decision) {
+            return decision.disposition ==
+                   tvchart::SimulationDecisionDisposition::Expired;
+        }));
+
+    tvchart::TradingSimulationSession approved;
+    error = approved.reset(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        {},
+        assistedConfig);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = approved.approveProposal();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = approved.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QVERIFY(approved.account().quantity > 0.0);
+}
+
+void StrategyEngineTests::
+restoresSimulationSnapshotsDeterministically() {
+    const auto bars = sampleBars();
+    const tvchart::TimeframeSeries additionalSeries{{
+        tvchart::Timeframe::OneDay,
+        {
+            bar(1'699'900'000, 100.0, 101.0),
+            bar(1'700'100'000, 101.0, 102.0),
+        },
+    }};
+    const tvchart::SimulationConfig config{
+        .strategy = crossingStrategy(),
+        .execution = {
+            .initialCapital = 25'000.0,
+            .allocationPercent = 40.0,
+            .commissionPerSide = 2.5,
+            .slippageBasisPoints = 15.0,
+            .allowFractionalShares = false,
+        },
+        .mode = tvchart::SimulationMode::Manual,
+        .startIndex = 2,
+    };
+    tvchart::TradingSimulationSession original;
+    auto error = original.reset(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        additionalSeries,
+        config);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = original.requestManualAction(
+        tvchart::SimulationAction::Enter);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = original.step();
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    error = original.requestManualAction(
+        tvchart::SimulationAction::Exit);
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+
+    const auto snapshot =
+        original.snapshot(
+            QStringLiteral("TEST"),
+            QStringLiteral("CSV"));
+    const auto encoded =
+        tvchart::serializeSimulationSnapshot(snapshot);
+    const auto decoded =
+        tvchart::deserializeSimulationSnapshot(encoded);
+    QVERIFY2(decoded.ok(), qPrintable(decoded.error));
+
+    tvchart::TradingSimulationSession restored;
+    error = restored.restore(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        additionalSeries,
+        decoded.snapshot,
+        QStringLiteral("TEST"),
+        QStringLiteral("CSV"));
+    QVERIFY2(error.isEmpty(), qPrintable(error));
+    QCOMPARE(
+        restored.account().currentTimestamp,
+        original.account().currentTimestamp);
+    QCOMPARE(
+        restored.account().pendingAction,
+        original.account().pendingAction);
+    QCOMPARE(
+        restored.account().cash,
+        original.account().cash);
+    QCOMPARE(
+        restored.account().quantity,
+        original.account().quantity);
+    QCOMPARE(
+        restored.trades().size(),
+        original.trades().size());
+
+    auto changed = bars;
+    changed.back().volume += 1.0;
+    tvchart::TradingSimulationSession incompatible;
+    error = incompatible.restore(
+        changed,
+        tvchart::Timeframe::FiveMinutes,
+        {},
+        decoded.snapshot,
+        QStringLiteral("TEST"),
+        QStringLiteral("CSV"));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!incompatible.active());
+
+    auto changedAdditional = additionalSeries;
+    changedAdditional.begin()->second.back().volume += 1.0;
+    error = incompatible.restore(
+        bars,
+        tvchart::Timeframe::FiveMinutes,
+        changedAdditional,
+        decoded.snapshot,
+        QStringLiteral("TEST"),
+        QStringLiteral("CSV"));
+    QVERIFY(!error.isEmpty());
+    QVERIFY(!incompatible.active());
+}
+
+void StrategyEngineTests::
+importsSafePineSubsetAndRejectsUnsupportedSemantics() {
+    const auto imported =
+        tvchart::importPineStrategy(
+            tvchart::pineStrategyExample());
+    QVERIFY2(
+        imported.ok(),
+        qPrintable(
+            tvchart::pineNativeStrategyPreview(imported)));
+    QCOMPARE(
+        imported.strategy.name,
+        QStringLiteral("EMA Cross Simulation"));
+    QCOMPARE(
+        imported.execution.initialCapital,
+        100'000.0);
+    QCOMPARE(
+        imported.execution.allocationPercent,
+        25.0);
+    QCOMPARE(
+        imported.strategy.entry.conditions.size(),
+        std::size_t{1});
+    QCOMPARE(
+        imported.strategy.entry.conditions.front().comparison,
+        tvchart::StrategyComparison::CrossesAbove);
+    QCOMPARE(
+        imported.strategy.entry.conditions.front().left.field,
+        tvchart::StrategyField::ExponentialMovingAverage);
+    QCOMPARE(
+        imported.strategy.entry.conditions.front().left.period,
+        std::uint32_t{20});
+    QVERIFY(
+        imported.strategy.entry.conditions.front().right.has_value());
+    QCOMPARE(
+        imported.strategy.entry.conditions.front().right->period,
+        std::uint32_t{50});
+
+    const auto grouped = tvchart::importPineStrategy(
+        QStringLiteral(
+            "//@version=6\n"
+            "strategy(\"Filtered\")\n"
+            "fast = ta.sma(close, 5)\n"
+            "slow = ta.sma(close, 20)\n"
+            "entryRule = ta.crossover(fast, slow) and close > slow\n"
+            "exitRule = ta.crossunder(fast, slow) or close < 5\n"
+            "if entryRule\n"
+            "    strategy.entry(\"Long\", strategy.long)\n"
+            "if exitRule\n"
+            "    strategy.close(\"Long\")\n"));
+    QVERIFY2(
+        grouped.ok(),
+        qPrintable(
+            tvchart::pineNativeStrategyPreview(grouped)));
+    QCOMPARE(
+        grouped.strategy.entry.match,
+        tvchart::ConditionMatch::All);
+    QCOMPARE(
+        grouped.strategy.entry.conditions.size(),
+        std::size_t{2});
+    QCOMPARE(
+        grouped.strategy.exit.match,
+        tvchart::ConditionMatch::Any);
+    QCOMPARE(
+        grouped.strategy.exit.conditions.size(),
+        std::size_t{2});
+
+    const auto namedDirection =
+        tvchart::importPineStrategy(
+            QStringLiteral(
+                "//@version=5\n"
+                "strategy(\"Named direction\")\n"
+                "enter = ta.crossover(close, ta.sma(close, 5))\n"
+                "leave = ta.crossunder(close, ta.sma(close, 5))\n"
+                "strategy.entry(id=\"Long\", direction=strategy.long, when=enter)\n"
+                "strategy.close(id=\"Long\", when=leave)\n"));
+    QVERIFY2(
+        namedDirection.ok(),
+        qPrintable(
+            tvchart::pineNativeStrategyPreview(namedDirection)));
+
+    const auto ambiguousSizing =
+        tvchart::importPineStrategy(
+            QStringLiteral(
+                "//@version=6\n"
+                "strategy(\"Ambiguous sizing\", default_qty_value=10)\n"
+                "enter = close > 1\n"
+                "leave = close < 1\n"
+                "strategy.entry(\"Long\", strategy.long, when=enter)\n"
+                "strategy.close(\"Long\", when=leave)\n"));
+    QVERIFY(!ambiguousSizing.ok());
+
+    const auto unsupportedLimit =
+        tvchart::importPineStrategy(
+            QStringLiteral(
+                "//@version=6\n"
+                "strategy(\"Limit order\")\n"
+                "enter = close > 1\n"
+                "leave = close < 1\n"
+                "strategy.entry(\"Long\", strategy.long, limit=close, when=enter)\n"
+                "strategy.close(\"Long\", when=leave)\n"));
+    QVERIFY(!unsupportedLimit.ok());
+
+    const auto unsupported = tvchart::importPineStrategy(
+        QStringLiteral(
+            "//@version=6\n"
+            "strategy(\"Unsafe\", calc_on_every_tick=true)\n"
+            "prior = close[1]\n"
+            "go = close > prior\n"
+            "if go\n"
+            "    strategy.entry(\"Short\", strategy.short)\n"
+            "if go\n"
+            "    strategy.exit(\"Exit\", stop=low)\n"));
+    QVERIFY(!unsupported.ok());
+    QVERIFY(std::ranges::count_if(
+                unsupported.diagnostics,
+                [](const tvchart::PineDiagnostic& diagnostic) {
+                    return diagnostic.severity ==
+                           tvchart::PineDiagnosticSeverity::Error;
+                }) >= 3);
+    QVERIFY(std::ranges::all_of(
+        unsupported.diagnostics,
+        [](const tvchart::PineDiagnostic& diagnostic) {
+            return diagnostic.line >= 1 &&
+                   diagnostic.column >= 1 &&
+                   !diagnostic.message.isEmpty();
+        }));
 }
 
 QTEST_APPLESS_MAIN(StrategyEngineTests)

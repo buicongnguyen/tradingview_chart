@@ -16,6 +16,7 @@
 #include <vector>
 
 class QAction;
+class QActionGroup;
 class QCloseEvent;
 class QComboBox;
 class QDoubleSpinBox;
@@ -62,6 +63,13 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
+    enum class WorkspaceLevel : int {
+        Basic,
+        Intermediate,
+        Advanced,
+        Custom,
+    };
+
     struct IndicatorControl {
         IndicatorKind kind{IndicatorKind::None};
         QTableWidgetItem* enabledItem{};
@@ -91,6 +99,11 @@ private:
     void buildRiskContextDock();
     void buildMarketStructureDock();
     void buildStrategyLabDock();
+    void applyWorkspaceLevel(WorkspaceLevel level, bool resetLayout = true);
+    void applyToolbarLevel(WorkspaceLevel level);
+    void selectWorkspaceLevelAction(WorkspaceLevel level);
+    void markWorkspaceCustom();
+    void resetDockLayout(bool revealAll);
     void restoreSettings();
     void restoreIndicatorSettings(QSettings& settings);
     void saveSettings() const;
@@ -254,6 +267,8 @@ private:
     QLabel* marginThresholdLabel_{};
 
     QAction* darkThemeAction_{};
+    QActionGroup* workspaceLevelActions_{};
+    QAction* marketStructureOverlayAction_{};
     Bars currentBars_;
     Bars comparisonBars_;
     std::vector<ChartPriceLevel> priceLevels_;
@@ -266,6 +281,9 @@ private:
     bool onlineDataEnabled_{true};
     bool settingsEnabled_{true};
     bool restoringSettings_{};
+    bool applyingWorkspaceProfile_{};
+    WorkspaceLevel workspaceLevel_{WorkspaceLevel::Intermediate};
+    WorkspaceLevel workspaceBaseLevel_{WorkspaceLevel::Intermediate};
 };
 
 } // namespace tvchart

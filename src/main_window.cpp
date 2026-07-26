@@ -17,6 +17,7 @@
 
 #include <QAbstractItemView>
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -43,6 +44,7 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMenuBar>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSaveFile>
@@ -73,7 +75,10 @@ namespace tvchart {
 namespace {
 
 constexpr auto kOrganization = "buicongnguyen";
+// Retain the legacy settings namespace so existing installations keep their
+// watchlists, layouts, strategies, and provider preferences after rebranding.
 constexpr auto kApplication = "TradingViewChart";
+constexpr auto kDockLayoutSchema = 2;
 constexpr auto kMaximumWatchlistFileBytes = qint64{2 * 1024 * 1024};
 constexpr auto kMaximumResearchFileBytes = qint64{2 * 1024 * 1024};
 
@@ -263,7 +268,7 @@ MainWindow::MainWindow(
 MainWindow::~MainWindow() = default;
 
 void MainWindow::buildUi() {
-    setWindowTitle(tr("TradingView Chart"));
+    setWindowTitle(tr("TradeChart Lab"));
     resize(1500, 900);
 
     chartView_ = new ChartView(this);
@@ -418,12 +423,196 @@ void MainWindow::buildUi() {
     darkThemeAction_->setChecked(true);
     connect(darkThemeAction_, &QAction::toggled, this, &MainWindow::applyTheme);
 
+    auto* toolsMenu = menuBar()->addMenu(tr("&Tools"));
+    auto* workspaceMenu =
+        toolsMenu->addMenu(tr("Workspace level"));
+    workspaceLevelActions_ = new QActionGroup(this);
+    workspaceLevelActions_->setExclusive(true);
+    const auto addWorkspaceAction =
+        [this, workspaceMenu](
+            const QString& text,
+            const QString& objectName,
+            const WorkspaceLevel level,
+            const QString& description) {
+            auto* action = workspaceMenu->addAction(text);
+            action->setObjectName(objectName);
+            action->setCheckable(true);
+            action->setData(static_cast<int>(level));
+            action->setStatusTip(description);
+            workspaceLevelActions_->addAction(action);
+            if (level != WorkspaceLevel::Custom) {
+                connect(
+                    action,
+                    &QAction::triggered,
+                    this,
+                    [this, level] {
+                        applyWorkspaceLevel(level);
+                        saveSettingsNow();
+                    });
+            } else {
+                action->setEnabled(false);
+            }
+            return action;
+        };
+    addWorkspaceAction(
+        tr("&Basic"),
+        QStringLiteral("workspaceBasicAction"),
+        WorkspaceLevel::Basic,
+        tr("Show the chart, watchlist, and calculated summary."));
+    addWorkspaceAction(
+        tr("&Intermediate"),
+        QStringLiteral("workspaceIntermediateAction"),
+        WorkspaceLevel::Intermediate,
+        tr("Add indicators, data quality, research, risk, and market structure."));
+    addWorkspaceAction(
+        tr("&Advanced"),
+        QStringLiteral("workspaceAdvancedAction"),
+        WorkspaceLevel::Advanced,
+        tr("Show every analysis and strategy workspace."));
+    workspaceMenu->addSeparator();
+    addWorkspaceAction(
+        tr("Custom (manual panels)"),
+        QStringLiteral("workspaceCustomAction"),
+        WorkspaceLevel::Custom,
+        tr("The visible panels have been customized manually."));
+    selectWorkspaceLevelAction(WorkspaceLevel::Intermediate);
+
+    auto* panelsMenu = toolsMenu->addMenu(tr("&Panels"));
+    auto* overlaysMenu =
+        toolsMenu->addMenu(tr("Chart &overlays"));
+    marketStructureOverlayAction_ =
+        overlaysMenu->addAction(tr("Market Structure overlays"));
+    marketStructureOverlayAction_->setObjectName(
+        QStringLiteral("marketStructureOverlayAction"));
+    marketStructureOverlayAction_->setCheckable(true);
+    marketStructureOverlayAction_->setChecked(true);
+    marketStructureOverlayAction_->setStatusTip(
+        tr("Show support, resistance, trendline, and pattern overlays."));
+    connect(
+        marketStructureOverlayAction_,
+        &QAction::toggled,
+        this,
+        [this](const bool visible) {
+            chartView_->bridge()->setMarketStructureVisible(visible);
+            comparisonChartView_->bridge()->setMarketStructureVisible(
+                visible);
+            if (!restoringSettings_ && !applyingWorkspaceProfile_) {
+                saveSettingsNow();
+            }
+        });
+
+    auto* simulationLabAction =
+        toolsMenu->addAction(tr("Trading Simulator…"));
+    simulationLabAction->setObjectName(
+        QStringLiteral("tradingSimulationAction"));
+    simulationLabAction->setStatusTip(
+        tr("Run a completed-candle cash-account simulation from a historical moment."));
+    connect(
+        simulationLabAction,
+        &QAction::triggered,
+        this,
+        [this] {
+            auto* dock = findChild<QDockWidget*>(
+                QStringLiteral("strategyLabDock"));
+            if (!dock || !strategyLab_) {
+                return;
+            }
+            if (!dock->isVisible()) {
+                applyingWorkspaceProfile_ = true;
+                dock->show();
+                applyingWorkspaceProfile_ = false;
+                markWorkspaceCustom();
+                saveSettingsNow();
+            }
+            resizeDocks({dock}, {520}, Qt::Vertical);
+            dock->raise();
+            strategyLab_->showTradingSimulation();
+        });
+
+    auto* scriptLabAction =
+        toolsMenu->addAction(tr("Safe Script Lab…"));
+    scriptLabAction->setObjectName(
+        QStringLiteral("safeScriptLabAction"));
+    scriptLabAction->setStatusTip(
+        tr("Compile a supported Pine-style subset into native strategy rules."));
+    connect(
+        scriptLabAction,
+        &QAction::triggered,
+        this,
+        [this] {
+            auto* dock = findChild<QDockWidget*>(
+                QStringLiteral("strategyLabDock"));
+            if (!dock || !strategyLab_) {
+                return;
+            }
+            if (!dock->isVisible()) {
+                applyingWorkspaceProfile_ = true;
+                dock->show();
+                applyingWorkspaceProfile_ = false;
+                markWorkspaceCustom();
+                saveSettingsNow();
+            }
+            resizeDocks({dock}, {520}, Qt::Vertical);
+            dock->raise();
+            strategyLab_->showScriptLab();
+        });
+
+    auto* theoryLabAction =
+        toolsMenu->addAction(tr("Theory Validation Lab…"));
+    theoryLabAction->setObjectName(
+        QStringLiteral("theoryValidationLabAction"));
+    theoryLabAction->setStatusTip(
+        tr("Compare current and saved theories at a selected historical moment."));
+    connect(
+        theoryLabAction,
+        &QAction::triggered,
+        this,
+        [this] {
+            auto* dock = findChild<QDockWidget*>(
+                QStringLiteral("strategyLabDock"));
+            if (!dock || !strategyLab_) {
+                return;
+            }
+            if (!dock->isVisible()) {
+                applyingWorkspaceProfile_ = true;
+                dock->show();
+                applyingWorkspaceProfile_ = false;
+                markWorkspaceCustom();
+                saveSettingsNow();
+            }
+            resizeDocks({dock}, {520}, Qt::Vertical);
+            dock->raise();
+            strategyLab_->showTheoryValidation();
+        });
+
+    toolsMenu->addSeparator();
+    auto* resetLayoutAction =
+        toolsMenu->addAction(tr("Reset workspace layout"));
+    resetLayoutAction->setObjectName(
+        QStringLiteral("resetWorkspaceLayoutAction"));
+    resetLayoutAction->setShortcut(
+        QKeySequence(QStringLiteral("Ctrl+Shift+0")));
+    connect(
+        resetLayoutAction,
+        &QAction::triggered,
+        this,
+        [this] {
+            resetDockLayout(false);
+            saveSettingsNow();
+        });
+
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
     helpMenu->addAction(tr("&About"), this, &MainWindow::showAbout);
 
     auto* toolbar = addToolBar(tr("Chart"));
     toolbar->setObjectName(QStringLiteral("chartToolbar"));
     toolbar->setMovable(false);
+    const auto setToolbarMinimumLevel =
+        [](QAction* action, const WorkspaceLevel level) {
+            action->setProperty(
+                "workspaceMinimumLevel",
+                static_cast<int>(level));
+        };
     toolbar->addAction(openAction);
     toolbar->addAction(refreshAction);
     toolbar->addAction(demoAction);
@@ -460,7 +649,12 @@ void MainWindow::buildUi() {
         });
 
     toolbar->addSeparator();
-    toolbar->addWidget(new QLabel(tr("Price basis"), toolbar));
+    auto* priceBasisLabelAction =
+        toolbar->addWidget(
+            new QLabel(tr("Price basis"), toolbar));
+    setToolbarMinimumLevel(
+        priceBasisLabelAction,
+        WorkspaceLevel::Intermediate);
     priceBasisSelector_ = new QComboBox(toolbar);
     priceBasisSelector_->setObjectName(
         QStringLiteral("priceBasisSelector"));
@@ -473,7 +667,11 @@ void MainWindow::buildUi() {
             priceAdjustmentModeLabel(mode),
             static_cast<int>(mode));
     }
-    toolbar->addWidget(priceBasisSelector_);
+    auto* priceBasisAction =
+        toolbar->addWidget(priceBasisSelector_);
+    setToolbarMinimumLevel(
+        priceBasisAction,
+        WorkspaceLevel::Intermediate);
     connect(
         priceBasisSelector_,
         &QComboBox::currentIndexChanged,
@@ -488,7 +686,10 @@ void MainWindow::buildUi() {
             }
         });
 
-    toolbar->addSeparator();
+    auto* scaleSeparator = toolbar->addSeparator();
+    setToolbarMinimumLevel(
+        scaleSeparator,
+        WorkspaceLevel::Intermediate);
     toolbar->addWidget(new QLabel(tr("Style"), toolbar));
     styleSelector_ = new QComboBox(toolbar);
     styleSelector_->addItem(tr("Candles"), QStringLiteral("candlestick"));
@@ -507,14 +708,26 @@ void MainWindow::buildUi() {
             saveSettingsNow();
         });
 
-    toolbar->addSeparator();
-    toolbar->addWidget(new QLabel(tr("Scale"), toolbar));
+    auto* scaleControlsSeparator = toolbar->addSeparator();
+    setToolbarMinimumLevel(
+        scaleControlsSeparator,
+        WorkspaceLevel::Intermediate);
+    auto* scaleLabelAction =
+        toolbar->addWidget(new QLabel(tr("Scale"), toolbar));
+    setToolbarMinimumLevel(
+        scaleLabelAction,
+        WorkspaceLevel::Intermediate);
     scaleSelector_ = new QComboBox(toolbar);
     scaleSelector_->setObjectName(QStringLiteral("scaleSelector"));
     scaleSelector_->addItem(tr("Linear"), QStringLiteral("normal"));
     scaleSelector_->addItem(tr("Log"), QStringLiteral("logarithmic"));
     scaleSelector_->addItem(tr("Percent"), QStringLiteral("percentage"));
-    toolbar->addWidget(scaleSelector_);
+    auto* scaleAction = toolbar->addWidget(scaleSelector_);
+    scaleAction->setObjectName(
+        QStringLiteral("scaleToolbarAction"));
+    setToolbarMinimumLevel(
+        scaleAction,
+        WorkspaceLevel::Intermediate);
     connect(
         scaleSelector_,
         &QComboBox::currentIndexChanged,
@@ -527,8 +740,15 @@ void MainWindow::buildUi() {
             saveSettingsNow();
         });
 
-    toolbar->addSeparator();
-    toolbar->addWidget(new QLabel(tr("Layout"), toolbar));
+    auto* layoutSeparator = toolbar->addSeparator();
+    setToolbarMinimumLevel(
+        layoutSeparator,
+        WorkspaceLevel::Advanced);
+    auto* layoutLabelAction =
+        toolbar->addWidget(new QLabel(tr("Layout"), toolbar));
+    setToolbarMinimumLevel(
+        layoutLabelAction,
+        WorkspaceLevel::Advanced);
     chartLayoutSelector_ = new QComboBox(toolbar);
     chartLayoutSelector_->setObjectName(QStringLiteral("chartLayoutSelector"));
     chartLayoutSelector_->addItem(tr("Single"), QStringLiteral("single"));
@@ -538,7 +758,13 @@ void MainWindow::buildUi() {
     chartLayoutSelector_->addItem(
         tr("Compare ↕"),
         QStringLiteral("vertical"));
-    toolbar->addWidget(chartLayoutSelector_);
+    auto* layoutAction =
+        toolbar->addWidget(chartLayoutSelector_);
+    layoutAction->setObjectName(
+        QStringLiteral("layoutToolbarAction"));
+    setToolbarMinimumLevel(
+        layoutAction,
+        WorkspaceLevel::Advanced);
     connect(
         chartLayoutSelector_,
         &QComboBox::currentIndexChanged,
@@ -553,9 +779,16 @@ void MainWindow::buildUi() {
         QStringLiteral("comparisonSymbolInput"));
     comparisonSymbolInput_->setPlaceholderText(tr("Compare symbol"));
     comparisonSymbolInput_->setMaximumWidth(120);
-    toolbar->addWidget(comparisonSymbolInput_);
+    auto* comparisonInputAction =
+        toolbar->addWidget(comparisonSymbolInput_);
+    setToolbarMinimumLevel(
+        comparisonInputAction,
+        WorkspaceLevel::Advanced);
     auto* loadComparisonAction =
         toolbar->addAction(tr("Load comparison"));
+    setToolbarMinimumLevel(
+        loadComparisonAction,
+        WorkspaceLevel::Advanced);
     connect(
         loadComparisonAction,
         &QAction::triggered,
@@ -571,16 +804,29 @@ void MainWindow::buildUi() {
     comparisonStatusLabel_->setObjectName(
         QStringLiteral("comparisonStatusLabel"));
     comparisonStatusLabel_->setMinimumWidth(240);
-    toolbar->addWidget(comparisonStatusLabel_);
+    auto* comparisonStatusAction =
+        toolbar->addWidget(comparisonStatusLabel_);
+    setToolbarMinimumLevel(
+        comparisonStatusAction,
+        WorkspaceLevel::Advanced);
 
-    toolbar->addSeparator();
+    auto* levelsSeparator = toolbar->addSeparator();
+    setToolbarMinimumLevel(
+        levelsSeparator,
+        WorkspaceLevel::Intermediate);
     auto* addLevelAction = toolbar->addAction(tr("Add level…"));
+    setToolbarMinimumLevel(
+        addLevelAction,
+        WorkspaceLevel::Intermediate);
     connect(
         addLevelAction,
         &QAction::triggered,
         this,
         &MainWindow::addPriceLevel);
     auto* clearLevelsAction = toolbar->addAction(tr("Clear levels"));
+    setToolbarMinimumLevel(
+        clearLevelsAction,
+        WorkspaceLevel::Intermediate);
     connect(
         clearLevelsAction,
         &QAction::triggered,
@@ -603,6 +849,42 @@ void MainWindow::buildUi() {
     buildMarginRiskDock();
     buildPortfolioDock();
     buildStrategyLabDock();
+
+    constexpr std::array panelDockNames{
+        "watchlistDock",
+        "analysisDock",
+        "indicatorDock",
+        "dataStatusDock",
+        "researchDock",
+        "riskContextDock",
+        "marketStructureDock",
+        "fundamentalDock",
+        "marginRiskDock",
+        "portfolioDock",
+        "strategyLabDock",
+    };
+    for (const auto* name : panelDockNames) {
+        auto* dock =
+            findChild<QDockWidget*>(QString::fromLatin1(name));
+        if (!dock) {
+            continue;
+        }
+        auto* toggleAction = dock->toggleViewAction();
+        panelsMenu->addAction(toggleAction);
+        connect(
+            toggleAction,
+            &QAction::toggled,
+            this,
+            [this](bool) {
+                if (!restoringSettings_ &&
+                    !applyingWorkspaceProfile_) {
+                    markWorkspaceCustom();
+                    saveSettingsNow();
+                }
+            });
+    }
+    applyWorkspaceLevel(WorkspaceLevel::Intermediate, false);
+    resetDockLayout(false);
     statusBar()->showMessage(tr("Starting local chart renderer…"));
     if (!historyAvailable) {
         statusBar()->showMessage(
@@ -1450,12 +1732,225 @@ void MainWindow::buildStrategyLabDock() {
         });
 }
 
+void MainWindow::selectWorkspaceLevelAction(
+    const WorkspaceLevel level) {
+    if (!workspaceLevelActions_) {
+        return;
+    }
+    for (auto* action : workspaceLevelActions_->actions()) {
+        if (action->data().toInt() == static_cast<int>(level)) {
+            action->setChecked(true);
+            return;
+        }
+    }
+}
+
+void MainWindow::markWorkspaceCustom() {
+    workspaceLevel_ = WorkspaceLevel::Custom;
+    selectWorkspaceLevelAction(workspaceLevel_);
+}
+
+void MainWindow::applyToolbarLevel(const WorkspaceLevel level) {
+    if (auto* toolbar = findChild<QToolBar*>(
+            QStringLiteral("chartToolbar"))) {
+        for (auto* action : toolbar->actions()) {
+            const auto minimumLevel =
+                action->property("workspaceMinimumLevel");
+            if (minimumLevel.isValid()) {
+                action->setVisible(
+                    static_cast<int>(level) >=
+                    minimumLevel.toInt());
+            }
+        }
+    }
+}
+
+void MainWindow::applyWorkspaceLevel(
+    const WorkspaceLevel level,
+    const bool resetLayout) {
+    if (level == WorkspaceLevel::Custom) {
+        markWorkspaceCustom();
+        return;
+    }
+
+    struct PanelVisibility {
+        const char* objectName;
+        WorkspaceLevel minimumLevel;
+    };
+    constexpr std::array panels{
+        PanelVisibility{"watchlistDock", WorkspaceLevel::Basic},
+        PanelVisibility{"analysisDock", WorkspaceLevel::Basic},
+        PanelVisibility{"indicatorDock", WorkspaceLevel::Intermediate},
+        PanelVisibility{"dataStatusDock", WorkspaceLevel::Intermediate},
+        PanelVisibility{"researchDock", WorkspaceLevel::Intermediate},
+        PanelVisibility{"riskContextDock", WorkspaceLevel::Intermediate},
+        PanelVisibility{"marketStructureDock", WorkspaceLevel::Intermediate},
+        PanelVisibility{"fundamentalDock", WorkspaceLevel::Advanced},
+        PanelVisibility{"marginRiskDock", WorkspaceLevel::Advanced},
+        PanelVisibility{"portfolioDock", WorkspaceLevel::Advanced},
+        PanelVisibility{"strategyLabDock", WorkspaceLevel::Advanced},
+    };
+
+    applyingWorkspaceProfile_ = true;
+    workspaceLevel_ = level;
+    workspaceBaseLevel_ = level;
+    selectWorkspaceLevelAction(level);
+    for (const auto& panel : panels) {
+        if (auto* dock = findChild<QDockWidget*>(
+                QString::fromLatin1(panel.objectName))) {
+            dock->setVisible(
+                static_cast<int>(level) >=
+                static_cast<int>(panel.minimumLevel));
+        }
+    }
+    applyToolbarLevel(level);
+    if (marketStructureOverlayAction_) {
+        marketStructureOverlayAction_->setChecked(
+            level != WorkspaceLevel::Basic);
+    }
+    applyingWorkspaceProfile_ = false;
+
+    if (resetLayout) {
+        resetDockLayout(false);
+    }
+    const auto label =
+        level == WorkspaceLevel::Basic
+            ? tr("Basic")
+            : level == WorkspaceLevel::Intermediate
+                  ? tr("Intermediate")
+                  : tr("Advanced");
+    statusBar()->showMessage(
+        tr("%1 workspace enabled. Use Tools > Panels to customize it.")
+            .arg(label),
+        6'000);
+}
+
+void MainWindow::resetDockLayout(const bool revealAll) {
+    constexpr std::array rightDockNames{
+        "analysisDock",
+        "indicatorDock",
+        "dataStatusDock",
+        "researchDock",
+        "fundamentalDock",
+        "riskContextDock",
+        "marketStructureDock",
+        "marginRiskDock",
+        "portfolioDock",
+    };
+    std::vector<QDockWidget*> rightDocks;
+    rightDocks.reserve(rightDockNames.size());
+    for (const auto* name : rightDockNames) {
+        if (auto* dock = findChild<QDockWidget*>(
+                QString::fromLatin1(name))) {
+            rightDocks.push_back(dock);
+        }
+    }
+    if (rightDocks.empty()) {
+        return;
+    }
+
+    auto* activeDock = rightDocks.front();
+    for (auto* dock : rightDocks) {
+        if (!dock->isHidden()) {
+            activeDock = dock;
+            break;
+        }
+    }
+    auto* anchor = rightDocks.front();
+    for (auto* dock : rightDocks) {
+        dock->setFloating(false);
+        addDockWidget(Qt::RightDockWidgetArea, dock);
+        if (dock != anchor) {
+            tabifyDockWidget(anchor, dock);
+        }
+        if (revealAll) {
+            dock->show();
+        }
+    }
+    resizeDocks({anchor}, {430}, Qt::Horizontal);
+
+    if (auto* watchlistDock = findChild<QDockWidget*>(
+            QStringLiteral("watchlistDock"))) {
+        watchlistDock->setFloating(false);
+        addDockWidget(Qt::LeftDockWidgetArea, watchlistDock);
+        if (revealAll) {
+            watchlistDock->show();
+        }
+        resizeDocks({watchlistDock}, {250}, Qt::Horizontal);
+    }
+    if (auto* strategyDock = findChild<QDockWidget*>(
+            QStringLiteral("strategyLabDock"))) {
+        strategyDock->setFloating(false);
+        addDockWidget(Qt::BottomDockWidgetArea, strategyDock);
+        if (revealAll) {
+            strategyDock->show();
+        }
+        resizeDocks({strategyDock}, {320}, Qt::Vertical);
+    }
+    activeDock->raise();
+}
+
 void MainWindow::restoreSettings() {
     QSettings settings(
         QString::fromLatin1(kOrganization),
         QString::fromLatin1(kApplication));
     restoreGeometry(settings.value(QStringLiteral("window/geometry")).toByteArray());
-    restoreState(settings.value(QStringLiteral("window/state")).toByteArray());
+    const auto restored = restoreState(
+        settings.value(QStringLiteral("window/state")).toByteArray());
+    const auto savedDockLayoutSchema =
+        settings
+            .value(QStringLiteral("window/dockLayoutSchema"), 0)
+            .toInt();
+    auto savedWorkspaceValue =
+        settings
+            .value(
+                QStringLiteral("window/workspaceLevel"),
+                static_cast<int>(WorkspaceLevel::Intermediate))
+            .toInt();
+    if (savedWorkspaceValue <
+            static_cast<int>(WorkspaceLevel::Basic) ||
+        savedWorkspaceValue >
+            static_cast<int>(WorkspaceLevel::Custom)) {
+        savedWorkspaceValue =
+            static_cast<int>(WorkspaceLevel::Intermediate);
+    }
+    workspaceLevel_ =
+        static_cast<WorkspaceLevel>(savedWorkspaceValue);
+    auto savedBaseLevelValue =
+        settings
+            .value(
+                QStringLiteral("window/workspaceBaseLevel"),
+                static_cast<int>(WorkspaceLevel::Intermediate))
+            .toInt();
+    if (savedBaseLevelValue <
+            static_cast<int>(WorkspaceLevel::Basic) ||
+        savedBaseLevelValue >
+            static_cast<int>(WorkspaceLevel::Advanced)) {
+        savedBaseLevelValue =
+            static_cast<int>(WorkspaceLevel::Intermediate);
+    }
+    workspaceBaseLevel_ =
+        static_cast<WorkspaceLevel>(savedBaseLevelValue);
+    if (workspaceLevel_ == WorkspaceLevel::Custom) {
+        selectWorkspaceLevelAction(workspaceLevel_);
+        applyToolbarLevel(workspaceBaseLevel_);
+    } else {
+        applyWorkspaceLevel(workspaceLevel_, false);
+    }
+    if (!restored ||
+        savedDockLayoutSchema < kDockLayoutSchema) {
+        QTimer::singleShot(
+            0,
+            this,
+            [this] {
+                const auto migratedLevel =
+                    workspaceLevel_ == WorkspaceLevel::Custom
+                        ? WorkspaceLevel::Intermediate
+                        : workspaceLevel_;
+                applyWorkspaceLevel(migratedLevel);
+                saveSettingsNow();
+            });
+    }
 
     const auto serializedWatchlists =
         settings.value(QStringLiteral("watchlists/json")).toByteArray();
@@ -1583,6 +2078,14 @@ void MainWindow::restoreSettings() {
     const auto dark =
         settings.value(QStringLiteral("chart/darkTheme"), true).toBool();
     darkThemeAction_->setChecked(dark);
+    const auto structureOverlayVisible =
+        settings
+            .value(
+                QStringLiteral("chart/marketStructureOverlay"),
+                workspaceLevel_ != WorkspaceLevel::Basic)
+            .toBool();
+    marketStructureOverlayAction_->setChecked(
+        structureOverlayVisible);
     applyTheme(dark);
     chartView_->bridge()->setChartStyle(styleSelector_->currentData().toString());
     chartView_->bridge()->setPriceScaleMode(
@@ -1673,6 +2176,15 @@ void MainWindow::saveSettings() const {
         QString::fromLatin1(kApplication));
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("window/state"), saveState());
+    settings.setValue(
+        QStringLiteral("window/dockLayoutSchema"),
+        kDockLayoutSchema);
+    settings.setValue(
+        QStringLiteral("window/workspaceLevel"),
+        static_cast<int>(workspaceLevel_));
+    settings.setValue(
+        QStringLiteral("window/workspaceBaseLevel"),
+        static_cast<int>(workspaceBaseLevel_));
     settings.setValue(QStringLiteral("chart/symbol"), activeSymbol());
     settings.setValue(
         QStringLiteral("chart/timeframe"),
@@ -1695,6 +2207,9 @@ void MainWindow::saveSettings() const {
     settings.setValue(
         QStringLiteral("chart/darkTheme"),
         darkThemeAction_->isChecked());
+    settings.setValue(
+        QStringLiteral("chart/marketStructureOverlay"),
+        marketStructureOverlayAction_->isChecked());
     QJsonArray priceLevels;
     for (const auto& level : priceLevels_) {
         priceLevels.append(QJsonObject{
@@ -3993,12 +4508,12 @@ void MainWindow::applyTheme(const bool dark) {
 
 void MainWindow::showAbout() {
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("About TradingView Chart"));
+    dialog.setWindowTitle(tr("About TradeChart Lab"));
     dialog.setMinimumWidth(560);
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
-        tr("<h2>TradingView Chart 1.0.0</h2>"
-           "<p>A C++/Qt market chart viewer with online and offline sources.</p>"
+        tr("<h2>TradeChart Lab 1.1.0</h2>"
+           "<p>A C++/Qt market chart, research, and simulation workbench.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "
            "Lightweight Charts™</a> 5.2.0 under the Apache-2.0 license.</p>"
@@ -4018,12 +4533,25 @@ void MainWindow::showAbout() {
            "long-only backtests, deterministic replay, cached-watchlist scans, "
            "and persistent foreground-only alerts. Provider history is stored locally "
            "with its provenance; synthetic demo bars are not cached.</p>"
+           "<p>The Trading Simulator uses completed-bar decisions and next-open "
+           "fills with an explicit starting balance, costs, manual/automatic/"
+           "assisted modes, and a local audit trail. It never connects to a "
+           "broker and its results are hypothetical.</p>"
+           "<p>The Safe Script Lab translates a documented, bounded subset of "
+           "Pine-style strategy syntax into the native rule model. Source text "
+           "is parsed but never executed; unsupported order or language "
+           "semantics are rejected instead of guessed.</p>"
            "<p>Yahoo views can use raw, split-adjusted, or total-return prices "
            "with requested/applied basis and quality shown explicitly. "
            "Adjusted views never overwrite the raw history cache.</p>"
            "<p>Strategy robustness reports use completed bars, no-lookahead "
            "multi-timeframe alignment, deterministic resampling, and explicit "
            "sample availability. They are diagnostics, not an optimizer.</p>"
+           "<p>The Theory Validation Lab freezes analysis at a selected "
+           "completed moment and compares fixed entry rules using "
+           "non-overlapping next-open 5/20-bar outcomes, chronological "
+           "holdout evidence, confidence intervals, and unconditional "
+           "baselines. Reliability is sample coverage, not a forecast.</p>"
            "<p>The paper ledger uses long-only average-cost accounting and "
            "marks valuation incomplete when a quote is missing. SEC/FRED "
            "calendar imports, comparison statistics, and chart levels retain "
@@ -4033,7 +4561,9 @@ void MainWindow::showAbout() {
            "time-weighted return is an approximate daily-close estimate.</p>"
            "<p>The crosshair values and calculations are descriptive, not "
            "forecasts or trading advice. Offline demo data is synthetic; "
-           "imported CSV data and watchlist notes remain local.</p>"),
+           "imported CSV data and watchlist notes remain local.</p>"
+           "<p>TradeChart Lab is an independent project and is not affiliated "
+           "with or endorsed by TradingView.</p>"),
         &dialog);
     label->setWordWrap(true);
     label->setOpenExternalLinks(true);
