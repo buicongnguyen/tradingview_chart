@@ -1,5 +1,7 @@
 #include "watchlists/watchlist_workspace.hpp"
 
+#include "util/csv_security.hpp"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -19,6 +21,7 @@ constexpr auto kMaximumEntries = std::size_t{500};
 constexpr auto kMaximumNoteLength = qsizetype{512};
 
 [[nodiscard]] QString csvField(QString value) {
+    value = protectSpreadsheetCsvText(std::move(value));
     value.replace(QStringLiteral("\""), QStringLiteral("\"\""));
     return QStringLiteral("\"%1\"").arg(value);
 }
@@ -297,8 +300,12 @@ WatchlistCsvResult importWatchlistCsv(const QByteArray& csv) {
         }
 
         WatchlistEntry entry{
-            .symbol = normalizeWatchlistSymbol(fields[symbolIndex]),
-            .note = noteIndex ? fields[*noteIndex].trimmed() : QString{},
+            .symbol = normalizeWatchlistSymbol(
+                restoreSpreadsheetCsvText(fields[symbolIndex])),
+            .note =
+                noteIndex
+                    ? restoreSpreadsheetCsvText(fields[*noteIndex]).trimmed()
+                    : QString{},
         };
         NamedWatchlist candidate{
             .id = QStringLiteral("csv"),

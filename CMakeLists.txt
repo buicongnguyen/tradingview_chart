@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradingViewChart VERSION 0.4.0 LANGUAGES CXX)
+project(TradingViewChart VERSION 0.5.0 LANGUAGES CXX)
 
 option(
     TRADINGVIEW_CHART_BUILD_TESTS
@@ -15,7 +15,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Network Sql)
 
 if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/web/vendor/lightweight-charts.standalone.production.js")
     message(FATAL_ERROR
@@ -34,6 +34,8 @@ add_library(tradingview_chart_core
     src/data/csv_bar_loader.hpp
     src/data/demo_data_source.cpp
     src/data/demo_data_source.hpp
+    src/data/historical_data_store.cpp
+    src/data/historical_data_store.hpp
     src/data/market_data_parser.cpp
     src/data/market_data_parser.hpp
     src/research/alpha_vantage_research_parser.cpp
@@ -42,11 +44,19 @@ add_library(tradingview_chart_core
     src/research/margin_risk.hpp
     src/research/research_models.cpp
     src/research/research_models.hpp
+    src/strategy/replay_session.cpp
+    src/strategy/replay_session.hpp
+    src/strategy/strategy_engine.cpp
+    src/strategy/strategy_engine.hpp
+    src/strategy/strategy_models.cpp
+    src/strategy/strategy_models.hpp
+    src/util/csv_security.cpp
+    src/util/csv_security.hpp
     src/watchlists/watchlist_workspace.cpp
     src/watchlists/watchlist_workspace.hpp
 )
 target_include_directories(tradingview_chart_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
-target_link_libraries(tradingview_chart_core PUBLIC Qt6::Core)
+target_link_libraries(tradingview_chart_core PUBLIC Qt6::Core Qt6::Sql)
 target_compile_features(tradingview_chart_core PUBLIC cxx_std_20)
 
 if(MSVC)
@@ -150,7 +160,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${android_package_dir}"
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 36
-        QT_ANDROID_VERSION_CODE 400
+        QT_ANDROID_VERSION_CODE 500
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
     )
 
@@ -170,8 +180,12 @@ else()
         src/chart/chart_view.hpp
         src/data/market_data_client.cpp
         src/data/market_data_client.hpp
+        src/network/bounded_network_reply.cpp
+        src/network/bounded_network_reply.hpp
         src/research/alpha_vantage_research_client.cpp
         src/research/alpha_vantage_research_client.hpp
+        src/strategy/strategy_lab_widget.cpp
+        src/strategy/strategy_lab_widget.hpp
         resources.qrc
     )
     target_link_libraries(tradingview_chart PRIVATE
@@ -245,14 +259,43 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         COMMAND tradingview_chart_research_tests
     )
 
+    add_executable(tradingview_chart_history_tests
+        tests/historical_data_store_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_history_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Sql
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_history_tests
+        COMMAND tradingview_chart_history_tests
+    )
+
+    add_executable(tradingview_chart_strategy_tests
+        tests/strategy_engine_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_strategy_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_strategy_tests
+        COMMAND tradingview_chart_strategy_tests
+    )
+
     set_tests_properties(
         tradingview_chart_tests
         tradingview_chart_indicator_tests
         tradingview_chart_watchlist_tests
         tradingview_chart_research_tests
+        tradingview_chart_history_tests
+        tradingview_chart_strategy_tests
         PROPERTIES
         ENVIRONMENT_MODIFICATION
-            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>;QT_PLUGIN_PATH=set:$<TARGET_FILE_DIR:Qt6::QSQLiteDriverPlugin>/.."
     )
 
     add_test(NAME tradingview_chart_web_smoke

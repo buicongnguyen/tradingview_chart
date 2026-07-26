@@ -4,6 +4,8 @@
 
 #include <QDateTime>
 #ifndef Q_OS_ANDROID
+#include "network/bounded_network_reply.hpp"
+
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -76,7 +78,7 @@ struct YahooQuery {
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradingViewChart/0.4.0 (Qt 6; personal client)"));
+        QStringLiteral("TradingViewChart/0.5.0 (Qt 6; personal client)"));
     request.setRawHeader("Accept", "application/json");
     request.setTransferTimeout(15'000);
     request.setAttribute(
@@ -85,12 +87,6 @@ struct YahooQuery {
     return request;
 }
 
-[[nodiscard]] QString replyError(QNetworkReply* reply) {
-    if (reply->error() != QNetworkReply::NoError) {
-        return reply->errorString();
-    }
-    return {};
-}
 #endif
 
 [[nodiscard]] QString responseError(
@@ -195,36 +191,35 @@ void MarketDataClient::requestYahoo(
 #else
     auto* reply = network_->get(marketDataRequest(url));
     activeReply_ = reply;
-    connect(
+    consumeBoundedNetworkReply(
         reply,
-        &QNetworkReply::finished,
+        kMaximumPayloadBytes,
         this,
         [this,
          reply,
          symbol,
          timeframe,
          requestGeneration,
-         callback = std::move(callback)]() mutable {
+         callback = std::move(callback)](
+            BoundedNetworkReplyResult response) mutable {
             if (requestGeneration != generation_) {
-                reply->deleteLater();
                 return;
             }
             if (activeReply_ == reply) {
                 activeReply_.clear();
             }
 
-            const auto status =
-                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            auto error = replyError(reply);
-            const auto payload = reply->readAll();
-            reply->deleteLater();
+            if (response.limitExceeded) {
+                response.transportError =
+                    QStringLiteral("response exceeded 10 MiB.");
+            }
             processYahooResponse(
                 symbol,
                 timeframe,
                 requestGeneration,
-                status,
-                std::move(error),
-                payload,
+                response.httpStatus,
+                std::move(response.transportError),
+                std::move(response.payload),
                 std::move(callback));
         });
 #endif
@@ -271,34 +266,33 @@ void MarketDataClient::requestTwelveData(
 #else
     auto* reply = network_->get(marketDataRequest(url));
     activeReply_ = reply;
-    connect(
+    consumeBoundedNetworkReply(
         reply,
-        &QNetworkReply::finished,
+        kMaximumPayloadBytes,
         this,
         [this,
          reply,
          requestGeneration,
          yahooError = std::move(yahooError),
-         callback = std::move(callback)]() mutable {
+         callback = std::move(callback)](
+            BoundedNetworkReplyResult response) mutable {
             if (requestGeneration != generation_) {
-                reply->deleteLater();
                 return;
             }
             if (activeReply_ == reply) {
                 activeReply_.clear();
             }
 
-            const auto status =
-                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            auto twelveError = replyError(reply);
-            const auto payload = reply->readAll();
-            reply->deleteLater();
+            if (response.limitExceeded) {
+                response.transportError =
+                    QStringLiteral("response exceeded 10 MiB.");
+            }
             processTwelveDataResponse(
                 requestGeneration,
                 std::move(yahooError),
-                status,
-                std::move(twelveError),
-                payload,
+                response.httpStatus,
+                std::move(response.transportError),
+                std::move(response.payload),
                 std::move(callback));
         });
 #endif

@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($QtRoot)) {
 }
 $buildDirectory = Join-Path $repositoryRoot 'build-release'
 $distRoot = Join-Path $repositoryRoot 'dist'
-$stage = Join-Path $distRoot 'TradingViewChart-0.4.0-win64'
+$stage = Join-Path $distRoot 'TradingViewChart-0.5.0-win64'
 $archive = "$stage.zip"
 
 & (Join-Path $PSScriptRoot 'configure-windows.ps1') `
@@ -66,13 +66,24 @@ try {
     $env:PATH = $originalPath
 }
 
-if (Test-Path -LiteralPath $distRoot) {
-    $resolvedRepository = [System.IO.Path]::GetFullPath($repositoryRoot)
-    $resolvedDist = [System.IO.Path]::GetFullPath($distRoot)
-    if (-not $resolvedDist.StartsWith("$resolvedRepository\", [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to replace an output directory outside the repository."
+$resolvedRepository = [System.IO.Path]::GetFullPath($repositoryRoot)
+$resolvedDist = [System.IO.Path]::GetFullPath($distRoot)
+if (-not $resolvedDist.StartsWith(
+        "$resolvedRepository\",
+        [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to replace output paths outside the repository."
+}
+New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
+foreach ($replaceTarget in @($stage, $archive, "$archive.sha256")) {
+    $resolvedTarget = [System.IO.Path]::GetFullPath($replaceTarget)
+    if (-not $resolvedTarget.StartsWith(
+            "$resolvedDist\",
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to replace an output outside the dist directory."
     }
-    Remove-Item -LiteralPath $distRoot -Recurse -Force
+    if (Test-Path -LiteralPath $replaceTarget) {
+        Remove-Item -LiteralPath $replaceTarget -Recurse -Force
+    }
 }
 New-Item -ItemType Directory -Path $stage | Out-Null
 
@@ -105,8 +116,10 @@ $requiredRuntimeFiles = @(
     'Qt6WebEngineCore.dll',
     'Qt6WebEngineWidgets.dll',
     'Qt6Network.dll',
+    'Qt6Sql.dll',
     'QtWebEngineProcess.exe',
     'platforms\qwindows.dll',
+    'sqldrivers\qsqlite.dll',
     'tls\qschannelbackend.dll',
     'resources\icudtl.dat'
 )

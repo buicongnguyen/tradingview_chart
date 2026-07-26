@@ -10,6 +10,7 @@ private slots:
     void importsAndExportsQuotedCsv();
     void rejectsInvalidAndDuplicateEntries();
     void sortsWithoutMutatingManualOrder();
+    void neutralizesSpreadsheetFormulas();
 };
 
 void WatchlistWorkspaceTests::roundTripsSavedWatchlists() {
@@ -90,6 +91,24 @@ void WatchlistWorkspaceTests::sortsWithoutMutatingManualOrder() {
     const auto order = tvchart::watchlistDisplayOrder(watchlist);
     QCOMPARE(order, std::vector<std::size_t>({1, 2, 0}));
     QCOMPARE(watchlist.entries.front().symbol, QStringLiteral("TSLA"));
+}
+
+void WatchlistWorkspaceTests::neutralizesSpreadsheetFormulas() {
+    const tvchart::NamedWatchlist watchlist{
+        .id = QStringLiteral("safe-export"),
+        .name = QStringLiteral("Safe export"),
+        .entries = {{
+            .symbol = QStringLiteral("AAPL"),
+            .note = QStringLiteral("=HYPERLINK(\"https://example.com\")"),
+        }},
+    };
+
+    const auto exported = tvchart::exportWatchlistCsv(watchlist);
+    QVERIFY(exported.contains(
+        QByteArrayLiteral("\"'=HYPERLINK(\"\"https://example.com\"\")\"")));
+    const auto imported = tvchart::importWatchlistCsv(exported);
+    QVERIFY2(imported.ok(), qPrintable(imported.error));
+    QCOMPARE(imported.entries, watchlist.entries);
 }
 
 QTEST_APPLESS_MAIN(WatchlistWorkspaceTests)

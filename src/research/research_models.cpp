@@ -1,5 +1,6 @@
 #include "research/research_models.hpp"
 
+#include "util/csv_security.hpp"
 #include "watchlists/watchlist_workspace.hpp"
 
 #include <QJsonArray>
@@ -19,6 +20,8 @@
 namespace tvchart {
 namespace {
 
+constexpr auto kMaximumTargetPrice = 1'000'000'000.0;
+
 [[nodiscard]] bool finitePositive(const double value) noexcept {
     return std::isfinite(value) && value > 0.0;
 }
@@ -36,6 +39,7 @@ namespace {
 }
 
 [[nodiscard]] QString csvField(QString value) {
+    value = protectSpreadsheetCsvText(std::move(value));
     value.replace(QStringLiteral("\""), QStringLiteral("\"\""));
     return QStringLiteral("\"%1\"").arg(value);
 }
@@ -339,6 +343,7 @@ QString validateTargetEstimate(const AnalystTargetEstimate& estimate) {
         estimate.organization.trimmed().isEmpty() ||
         estimate.organization.size() > 120 ||
         !finitePositive(estimate.targetPrice) ||
+        estimate.targetPrice > kMaximumTargetPrice ||
         estimate.currency.trimmed().isEmpty() ||
         estimate.currency.size() > 12 ||
         !estimate.publishedDate.isValid() ||
@@ -380,7 +385,8 @@ QString validateCompanySnapshot(const CompanyResearchSnapshot& snapshot) {
         }
     }
     if (snapshot.analystTargetPrice &&
-        !finitePositive(*snapshot.analystTargetPrice)) {
+        (!finitePositive(*snapshot.analystTargetPrice) ||
+         *snapshot.analystTargetPrice > kMaximumTargetPrice)) {
         return QStringLiteral("Company analyst target must be positive.");
     }
     const std::array ratings{
@@ -458,7 +464,8 @@ std::optional<TargetConsensusSummary> summarizeOrganizationTargets(
     const auto middle = values.size() / 2;
     const auto median =
         values.size() % 2 == 0
-            ? (values[middle - 1] + values[middle]) / 2.0
+            ? values[middle - 1] +
+                  ((values[middle] - values[middle - 1]) / 2.0)
             : values[middle];
     return TargetConsensusSummary{
         .organizationCount = values.size(),
@@ -754,9 +761,10 @@ TargetCsvResult importTargetEstimatesCsv(const QByteArray& csv) {
         const auto publishedDate = QDate::fromString(
             fields[columns[4]].trimmed(),
             Qt::ISODate);
-        const auto symbol =
-            normalizeWatchlistSymbol(fields[columns[0]]);
-        const auto organization = fields[columns[1]].trimmed();
+        const auto symbol = normalizeWatchlistSymbol(
+            restoreSpreadsheetCsvText(fields[columns[0]]));
+        const auto organization =
+            restoreSpreadsheetCsvText(fields[columns[1]]).trimmed();
         const auto identity =
             symbol + u'|' + organization.toCaseFolded() + u'|' +
             fields[columns[3]].trimmed().toUpper() + u'|' +
@@ -771,9 +779,13 @@ TargetCsvResult importTargetEstimatesCsv(const QByteArray& csv) {
             .currency = fields[columns[3]].trimmed().toUpper(),
             .publishedDate = publishedDate,
             .rating =
-                ratingColumn ? fields[*ratingColumn].trimmed() : QString{},
+                ratingColumn
+                    ? restoreSpreadsheetCsvText(fields[*ratingColumn]).trimmed()
+                    : QString{},
             .sourceUrl =
-                sourceColumn ? fields[*sourceColumn].trimmed() : QString{},
+                sourceColumn
+                    ? restoreSpreadsheetCsvText(fields[*sourceColumn]).trimmed()
+                    : QString{},
         };
         if (!validateTargetEstimate(estimate).isEmpty() ||
             std::ranges::find(identities, identity) != identities.end()) {

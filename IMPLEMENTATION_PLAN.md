@@ -3,7 +3,8 @@
 Status: original offline MVP completed on 2026-07-24; reviewed online-provider
 extension implemented on 2026-07-25; data-intelligence workstation package
 implemented on 2026-07-26; Android package implemented and emulator-tested on
-2026-07-26.
+2026-07-26; Phase 10 Strategy Lab, local history cache, and boundary hardening
+implemented and package-verified on 2026-07-26.
 
 ## 1. Goal and non-goals
 
@@ -22,9 +23,10 @@ providers when a network is available:
 - it has no Alpaca code or broker coupling.
 
 Non-goals are real-money trading, scraping TradingView, unofficial TradingView
-data endpoints, app-store publication, screeners, alerts, backtesting, and
-paper order execution. Yahoo's chart endpoint is explicitly labeled as
-unofficial and is never presented as a TradingView data service.
+data endpoints, app-store publication, broker connectivity, short selling,
+background/mobile alerts, multi-timeframe rule joins, and paper order
+execution. Yahoo's chart endpoint is explicitly labeled as unofficial and is
+never presented as a TradingView data service.
 
 ## 2. Reviewed findings
 
@@ -62,12 +64,17 @@ library in `QWebEngineView`, package all web assets locally, and use
 Qt MainWindow
   ├── Named watchlists / timeframe / style / scale / theme controls
   ├── Configurable multi-indicator and data-status docks
+  ├── Strategy Lab
+  │     ├── shared conditions / next-bar backtest
+  │     ├── deterministic replay
+  │     └── cached scanner / foreground alerts
   ├── MarketDataClient
   │     ├── Yahoo Finance (primary)
   │     └── Twelve Data (optional fallback)
   ├── DemoDataSource ─┐
   ├── CsvBarLoader ───┼── std::vector<Bar>
   ├── TechnicalIndicators / WatchlistWorkspace
+  ├── HistoricalDataStore (provider-attributed SQLite)
   └── ChartView
         ├── ChartBridge (QWebChannel)
         └── local index.html + chart.js
@@ -214,28 +221,104 @@ contains Internet access but no location/storage permissions; the renderer and
 license assets are packaged locally; and GitHub Releases provides the APK and
 SHA-256 checksum.
 
+### Phase 10 — local Strategy Lab and boundary hardening
+
+Deliver a provider-attributed SQLite history cache, one reusable condition
+model, long-only next-bar backtesting, deterministic bar replay, cached
+watchlist scanning, and foreground local alerts. Also close the release and
+input-boundary findings from the Phase 9 review.
+
+The reusable rule vocabulary is deliberately small:
+
+- fields: close, volume, SMA, EMA, RSI, and volume ratio;
+- comparisons: greater than, less than, crosses above, and crosses below;
+- right-hand values: another field or a finite constant; and
+- groups: require all conditions or any condition.
+
+The engine supports multiple entry and exit conditions even though the first
+desktop editor presents one entry rule and one exit rule. This keeps the
+storage and evaluator reusable by chart markers, alerts, scanner, replay, and
+backtest without making the first UI difficult to audit.
+
+Backtest invariants:
+
+1. A rule is evaluated only after bar `i` closes.
+2. A resulting order executes at bar `i + 1` open, never on bar `i`.
+3. Entry slippage increases the execution price and exit slippage decreases it.
+4. Commission is applied to both sides and an entry is rejected when its total
+   cost exceeds available cash.
+5. Long-only quantity and cash can never be negative.
+6. An open final position is marked to the last close and recorded as a forced
+   close, so metrics and the trade list reconcile to final equity.
+7. The equity curve includes idle cash and the marked value of an open
+   position. Maximum drawdown is calculated from that complete curve.
+8. The engine never synthesizes missing bars or interprets provider gaps as
+   zero returns.
+
+Cache invariants:
+
+1. The primary key is provider, normalized symbol, timeframe, and timestamp.
+2. New downloads upsert overlapping bars inside one transaction and do not
+   delete older non-overlapping history.
+3. Each series records delivery mode, exchange, currency, timezone,
+   instrument type, interval, provider retrieval time, and cache update time.
+4. Invalid bars, unknown timeframes, empty provider/symbol identities, and
+   non-finite values are rejected before a transaction starts.
+5. Cache reads are ordered and revalidated through the domain validator.
+6. Synthetic demo data is not persisted as provider history.
+
+Scanner and alert invariants:
+
+1. Scans use only each series' latest completed bar.
+2. A symbol with missing history or insufficient indicator warm-up produces an
+   explicit unavailable result, not a non-match.
+3. Foreground alerts are edge-triggered once per symbol/bar and keep an audit
+   record; they do not claim to run while the application is closed.
+4. The same evaluator and condition serialization are used by the backtest,
+   scanner, and alert path.
+
+Security and release invariants:
+
+1. Android signing material is never generated implicitly. A new key requires
+   an explicit initialization switch, and partial key material is always an
+   error.
+2. Debug or unsigned APKs use distinct names and cannot overwrite the canonical
+   signed release artifact.
+3. Network and CSV payload limits are enforced while reading, before an
+   unbounded in-memory copy exists.
+4. Spreadsheet exports neutralize formula-leading text.
+5. Imported target prices use the same bounded range as the UI, and even-count
+   medians avoid overflow.
+
+Gate: cache round-trip, overlap upsert, provenance, evaluator warm-up/crossing,
+next-bar execution, costs, drawdown, replay boundaries, scanner unavailable
+states, alert de-duplication, signing failure modes, bounded inputs, and formula
+neutralization have automated coverage. The Windows package passes its isolated
+WebEngine smoke test, the Android release still builds and signs with the
+existing key, and the live Yahoo diagnostic remains valid.
+
 ## 5. Follow-on roadmap
 
 After the MVP is stable:
 
-1. Add an explicit provider-permission-aware offline historical cache.
-2. Generalize the implemented `MarketDataClient` behind `IMarketDataSource`
+1. Generalize the implemented `MarketDataClient` behind `IMarketDataSource`
    when a third provider or streaming transport is added.
-3. Reassess provider licensing, redistribution, authentication, and retention
+2. Reassess provider licensing, redistribution, authentication, and retention
    rules before public or commercial distribution.
-4. Add incremental `update()` streaming, gap detection, reconnect, and bounded
+3. Add incremental `update()` streaming, gap detection, reconnect, and bounded
    memory.
-5. Add drawing tools, undo/redo, and named chart-layout persistence.
-6. Add explainable local alerts only after durable rule/audit persistence.
-7. Add SEC EDGAR filing events and curated FRED release series only after
+4. Add drawing tools, undo/redo, and named chart-layout persistence.
+5. Add durable scheduled/background notifications only after OS-specific
+   lifecycle and permission handling are implemented.
+6. Add SEC EDGAR filing events and curated FRED release series only after
    issuer mapping, release calendars, update policy, and provenance are
    explicit; neither source supplies analyst price targets.
-8. Add historical percent-return backtests and multi-symbol screening only
-   after dataset provenance, adjusted-price policy, and provider quotas are
-   explicit.
-9. Add paper trading only after quote freshness and audit requirements are
+7. Add multi-timeframe conditions, portfolio backtests, short selling, and
+   benchmark/risk-adjusted metrics only after calendar alignment,
+   adjusted-price policy, and annualization rules are explicit.
+8. Add paper trading only after quote freshness and audit requirements are
    defined.
-10. Add a Play Store App Bundle only after a stable signing-key backup,
+9. Add a Play Store App Bundle only after a stable signing-key backup,
     store-listing privacy disclosures, provider-terms review, and device-matrix
     testing.
 
@@ -277,4 +360,6 @@ switching, provenance-aware research records, latest-per-organization target
 summaries, an explicitly estimated event calendar, and a transparent
 margin-maintenance scenario. The Android APK must additionally run live Yahoo
 data in an emulator, use only expected permissions, and verify with
-`apksigner`.
+`apksigner`. Version 0.5 also requires the Phase 10 cache and analytics
+invariants above, clear foreground-only alert wording, and reproducible
+reconciliation between each backtest trade list and its final equity.
