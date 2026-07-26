@@ -3,8 +3,13 @@
 #include "data/market_data_parser.hpp"
 
 #include <QDateTime>
+#ifndef Q_OS_ANDROID
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QNetworkRequest>
+#else
+#include "data/android_http_client.hpp"
+#endif
 #include <QUrl>
 #include <QUrlQuery>
 
@@ -66,11 +71,12 @@ struct YahooQuery {
     return symbol.trimmed().toUpper();
 }
 
+#ifndef Q_OS_ANDROID
 [[nodiscard]] QNetworkRequest marketDataRequest(const QUrl& url) {
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradingViewChart/0.3.0 (Qt 6; personal desktop client)"));
+        QStringLiteral("TradingViewChart/0.4.0 (Qt 6; personal client)"));
     request.setRawHeader("Accept", "application/json");
     request.setTransferTimeout(15'000);
     request.setAttribute(
@@ -79,14 +85,26 @@ struct YahooQuery {
     return request;
 }
 
-[[nodiscard]] QString replyError(QNetworkReply* reply, const QString& provider) {
+[[nodiscard]] QString replyError(QNetworkReply* reply) {
     if (reply->error() != QNetworkReply::NoError) {
-        return QStringLiteral("%1 request failed: %2").arg(provider, reply->errorString());
+        return reply->errorString();
     }
-    const auto status =
-        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status < 200 || status >= 300) {
-        return QStringLiteral("%1 returned HTTP %2.").arg(provider).arg(status);
+    return {};
+}
+#endif
+
+[[nodiscard]] QString responseError(
+    const int httpStatus,
+    const QString& transportError,
+    const QString& provider) {
+    if (!transportError.isEmpty()) {
+        return QStringLiteral("%1 request failed: %2")
+            .arg(provider, transportError);
+    }
+    if (httpStatus < 200 || httpStatus >= 300) {
+        return QStringLiteral("%1 returned HTTP %2.")
+            .arg(provider)
+            .arg(httpStatus);
     }
     return {};
 }
@@ -95,7 +113,11 @@ struct YahooQuery {
 
 MarketDataClient::MarketDataClient(QObject* parent)
     : QObject(parent),
+#ifdef Q_OS_ANDROID
+      network_(new AndroidHttpClient(this)),
+#else
       network_(new QNetworkAccessManager(this)),
+#endif
       twelveDataKey_(qEnvironmentVariable("TWELVE_DATA_API_KEY").trimmed()) {}
 
 void MarketDataClient::fetch(
@@ -109,11 +131,20 @@ void MarketDataClient::fetch(
 
 void MarketDataClient::cancel() {
     ++generation_;
+#ifdef Q_OS_ANDROID
+    network_->cancel(activeRequestToken_);
+    activeRequestToken_ = 0;
+#else
     if (activeReply_) {
         activeReply_->abort();
         activeReply_->deleteLater();
         activeReply_.clear();
     }
+#endif
+}
+
+void MarketDataClient::setTwelveDataKey(QString apiKey) {
+    twelveDataKey_ = apiKey.trimmed().left(256);
 }
 
 bool MarketDataClient::hasTwelveDataKey() const noexcept {
@@ -137,6 +168,31 @@ void MarketDataClient::requestYahoo(
     query.addQueryItem(QStringLiteral("events"), QStringLiteral("div,splits"));
     url.setQuery(query);
 
+#ifdef Q_OS_ANDROID
+    activeRequestToken_ = network_->get(
+        url,
+        kMaximumPayloadBytes,
+        [
+            this,
+            symbol,
+            timeframe,
+            requestGeneration,
+            callback = std::move(callback)
+        ](
+            const int httpStatus,
+            QByteArray payload,
+            QString transportError) mutable {
+            activeRequestToken_ = 0;
+            processYahooResponse(
+                symbol,
+                timeframe,
+                requestGeneration,
+                httpStatus,
+                std::move(transportError),
+                std::move(payload),
+                std::move(callback));
+        });
+#else
     auto* reply = network_->get(marketDataRequest(url));
     activeReply_ = reply;
     connect(
@@ -157,43 +213,21 @@ void MarketDataClient::requestYahoo(
                 activeReply_.clear();
             }
 
-            auto error = replyError(reply, QStringLiteral("Yahoo Finance"));
+            const auto status =
+                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            auto error = replyError(reply);
             const auto payload = reply->readAll();
             reply->deleteLater();
-            if (error.isEmpty() && payload.size() > kMaximumPayloadBytes) {
-                error = QStringLiteral("Yahoo Finance response exceeded 10 MiB.");
-            }
-            if (error.isEmpty()) {
-                auto parsed = MarketDataParser::parseYahoo(payload);
-                if (parsed.ok()) {
-                    parsed.metadata.retrievedAtUtc =
-                        QDateTime::currentSecsSinceEpoch();
-                    callback({
-                        .bars = std::move(parsed.bars),
-                        .source = QStringLiteral("Yahoo Finance"),
-                        .metadata = std::move(parsed.metadata),
-                    });
-                    return;
-                }
-                error = std::move(parsed.error);
-            }
-
-            if (hasTwelveDataKey()) {
-                requestTwelveData(
-                    symbol,
-                    timeframe,
-                    requestGeneration,
-                    std::move(error),
-                    std::move(callback));
-                return;
-            }
-            callback({
-                .error = error +
-                         QStringLiteral(
-                             " Twelve Data fallback is disabled because "
-                             "TWELVE_DATA_API_KEY is not set."),
-            });
+            processYahooResponse(
+                symbol,
+                timeframe,
+                requestGeneration,
+                status,
+                std::move(error),
+                payload,
+                std::move(callback));
         });
+#endif
 }
 
 void MarketDataClient::requestTwelveData(
@@ -212,6 +246,29 @@ void MarketDataClient::requestTwelveData(
     query.addQueryItem(QStringLiteral("apikey"), twelveDataKey_);
     url.setQuery(query);
 
+#ifdef Q_OS_ANDROID
+    activeRequestToken_ = network_->get(
+        url,
+        kMaximumPayloadBytes,
+        [
+            this,
+            requestGeneration,
+            yahooError = std::move(yahooError),
+            callback = std::move(callback)
+        ](
+            const int httpStatus,
+            QByteArray payload,
+            QString transportError) mutable {
+            activeRequestToken_ = 0;
+            processTwelveDataResponse(
+                requestGeneration,
+                std::move(yahooError),
+                httpStatus,
+                std::move(transportError),
+                std::move(payload),
+                std::move(callback));
+        });
+#else
     auto* reply = network_->get(marketDataRequest(url));
     activeReply_ = reply;
     connect(
@@ -231,32 +288,109 @@ void MarketDataClient::requestTwelveData(
                 activeReply_.clear();
             }
 
-            auto twelveError = replyError(reply, QStringLiteral("Twelve Data"));
+            const auto status =
+                reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            auto twelveError = replyError(reply);
             const auto payload = reply->readAll();
             reply->deleteLater();
-            if (twelveError.isEmpty() && payload.size() > kMaximumPayloadBytes) {
-                twelveError = QStringLiteral("Twelve Data response exceeded 10 MiB.");
-            }
-            if (twelveError.isEmpty()) {
-                auto parsed = MarketDataParser::parseTwelveData(payload);
-                if (parsed.ok()) {
-                    parsed.metadata.retrievedAtUtc =
-                        QDateTime::currentSecsSinceEpoch();
-                    callback({
-                        .bars = std::move(parsed.bars),
-                        .source = QStringLiteral("Twelve Data"),
-                        .metadata = std::move(parsed.metadata),
-                    });
-                    return;
-                }
-                twelveError = std::move(parsed.error);
-            }
-
-            callback({
-                .error = QStringLiteral("%1 Fallback also failed: %2")
-                             .arg(yahooError, twelveError),
-            });
+            processTwelveDataResponse(
+                requestGeneration,
+                std::move(yahooError),
+                status,
+                std::move(twelveError),
+                payload,
+                std::move(callback));
         });
+#endif
+}
+
+void MarketDataClient::processYahooResponse(
+    const QString& symbol,
+    const Timeframe timeframe,
+    const std::uint64_t requestGeneration,
+    const int httpStatus,
+    QString transportError,
+    QByteArray payload,
+    Callback callback) {
+    if (requestGeneration != generation_) {
+        return;
+    }
+
+    auto error = responseError(
+        httpStatus,
+        transportError,
+        QStringLiteral("Yahoo Finance"));
+    if (error.isEmpty() && payload.size() > kMaximumPayloadBytes) {
+        error = QStringLiteral("Yahoo Finance response exceeded 10 MiB.");
+    }
+    if (error.isEmpty()) {
+        auto parsed = MarketDataParser::parseYahoo(payload);
+        if (parsed.ok()) {
+            parsed.metadata.retrievedAtUtc = QDateTime::currentSecsSinceEpoch();
+            callback({
+                .bars = std::move(parsed.bars),
+                .source = QStringLiteral("Yahoo Finance"),
+                .metadata = std::move(parsed.metadata),
+            });
+            return;
+        }
+        error = std::move(parsed.error);
+    }
+
+    if (hasTwelveDataKey()) {
+        requestTwelveData(
+            symbol,
+            timeframe,
+            requestGeneration,
+            std::move(error),
+            std::move(callback));
+        return;
+    }
+    callback({
+        .error = error +
+                 QStringLiteral(
+                     " Twelve Data fallback is disabled because no API key is "
+                     "configured."),
+    });
+}
+
+void MarketDataClient::processTwelveDataResponse(
+    const std::uint64_t requestGeneration,
+    QString yahooError,
+    const int httpStatus,
+    QString transportError,
+    QByteArray payload,
+    Callback callback) {
+    if (requestGeneration != generation_) {
+        return;
+    }
+
+    auto twelveError = responseError(
+        httpStatus,
+        transportError,
+        QStringLiteral("Twelve Data"));
+    if (twelveError.isEmpty() && payload.size() > kMaximumPayloadBytes) {
+        twelveError = QStringLiteral("Twelve Data response exceeded 10 MiB.");
+    }
+    if (twelveError.isEmpty()) {
+        auto parsed = MarketDataParser::parseTwelveData(payload);
+        if (parsed.ok()) {
+            parsed.metadata.retrievedAtUtc = QDateTime::currentSecsSinceEpoch();
+            callback({
+                .bars = std::move(parsed.bars),
+                .source = QStringLiteral("Twelve Data"),
+                .metadata = std::move(parsed.metadata),
+            });
+            return;
+        }
+        twelveError = std::move(parsed.error);
+    }
+
+    callback({
+        .error =
+            QStringLiteral("%1 Fallback also failed: %2")
+                .arg(yahooError, twelveError),
+    });
 }
 
 } // namespace tvchart

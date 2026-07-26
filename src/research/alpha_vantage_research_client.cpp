@@ -23,7 +23,7 @@ constexpr qsizetype kMaximumResearchPayloadBytes = 5 * 1024 * 1024;
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradingViewChart/0.3.0 (Qt 6; personal desktop client)"));
+        QStringLiteral("TradingViewChart/0.4.0 (Qt 6; personal client)"));
     request.setRawHeader("Accept", "application/json,text/csv");
     request.setTransferTimeout(15'000);
     request.setAttribute(

@@ -506,9 +506,41 @@
     reportError(event.error ?? event.message);
   });
 
-  try {
-    createPriceSeries();
-    if (!window.qt?.webChannelTransport) {
+  function receiveMobileCommand(command) {
+    if (command === null || typeof command !== "object") {
+      throw new Error("Invalid command from the mobile host");
+    }
+    switch (String(command.type ?? "")) {
+      case "series":
+        setBars(
+          command.symbol,
+          command.timeframe,
+          command.source,
+          command.bars ?? [],
+        );
+        break;
+      case "theme":
+        setTheme(command.dark);
+        break;
+      case "style":
+        setStyle(command.style);
+        break;
+      case "priceScale":
+        setPriceScaleMode(command.mode);
+        break;
+      case "indicators":
+        setIndicators(command.calculations ?? []);
+        break;
+      case "fit":
+        chart.timeScale().fitContent();
+        break;
+      default:
+        throw new Error(`Unsupported mobile chart command: ${command.type}`);
+    }
+  }
+
+  function connectDesktopBridge() {
+    if (!window.qt?.webChannelTransport || typeof QWebChannel !== "function") {
       throw new Error("Qt WebChannel transport is unavailable");
     }
     new QWebChannel(window.qt.webChannelTransport, (channel) => {
@@ -551,6 +583,28 @@
       bridge.fitRequested.connect(() => chart.timeScale().fitContent());
       bridge.webReady();
     });
+  }
+
+  function connectMobileHost() {
+    window.mobileChart = Object.freeze({
+      receive(command) {
+        try {
+          receiveMobileCommand(command);
+        } catch (error) {
+          reportError(error);
+          throw error;
+        }
+      },
+    });
+  }
+
+  try {
+    createPriceSeries();
+    if (document.documentElement.dataset.host === "mobile") {
+      connectMobileHost();
+    } else {
+      connectDesktopBridge();
+    }
   } catch (error) {
     reportError(error);
   }

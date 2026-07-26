@@ -1,6 +1,6 @@
 # TradingView Chart
 
-An online-capable C++20/Qt 6 desktop chart viewer powered by
+An online-capable C++20/Qt 6 chart viewer for Windows and Android, powered by
 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts).
 
 The application does **not** require Alpaca, a broker account, or an application
@@ -12,7 +12,20 @@ demo data. Local OHLCV CSV import remains available.
 Lightweight Charts is only the renderer. Provider availability, freshness,
 rate limits, terms, and market-data display rights still apply.
 
-## Version 0.3 features
+## Version 0.4 features
+
+- Native Qt Android application for Android 9 (API 28) and newer, distributed
+  as a signed ARM64 APK.
+- Responsive Qt Quick controls surrounding the same locally packaged
+  Lightweight Charts renderer used by the desktop application.
+- Android-native HTTPS through `HttpsURLConnection`, the device trust store,
+  and TLS-only URLs; no bundled OpenSSL binary or cleartext traffic.
+- Live Yahoo Finance data by default, plus an optional in-session Twelve Data
+  key that is not persisted.
+- Candlestick, line, and area charts with volume and the desktop calculation
+  engine's technical indicators on mobile.
+- Android CI that builds and inspects an unsigned reproducible APK on every
+  pull request; signed public APKs are attached to GitHub Releases.
 
 - Qt Widgets desktop shell with an embedded, local Qt WebEngine chart.
 - Candlestick, line, and area display modes.
@@ -75,7 +88,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.3.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.4.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -94,7 +107,7 @@ Set a key before starting the application, then use the **Research** dock's
 
 ```powershell
 $env:ALPHA_VANTAGE_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.3.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.4.0-win64\tradingview_chart.exe
 ```
 
 The refresh retrieves the selected company's overview followed by its earnings
@@ -196,7 +209,7 @@ data rights. This repository deliberately separates:
 7. the Qt/WebChannel bridge; and
 8. the JavaScript chart renderer.
 
-## Prerequisites
+## Windows prerequisites
 
 - Windows 10/11
 - Visual Studio 2022 C++ workload
@@ -248,6 +261,45 @@ The Windows GitHub Actions workflow runs this same packaging path and uploads
 the tested ZIP plus its SHA-256 file as workflow artifacts. This verifies the
 deployed Qt WebChannel, WebEngine, networking, platform, and TLS runtime files,
 not only the raw build output.
+
+## Android APK
+
+The release page provides
+`TradingViewChart-0.4.0-android-arm64-v8a.apk` for typical modern Android
+phones. Download it on the phone, verify its SHA-256 against the adjacent
+`.sha256` file, allow installation from the browser or file manager when
+Android prompts, and open **TradingView Chart**. Android may show a Play Protect
+warning because this APK is distributed directly rather than through Google
+Play.
+
+Requirements:
+
+- Android 9 or newer;
+- an ARM64 (`arm64-v8a`) device; and
+- internet access for live Yahoo or Twelve Data values.
+
+The app starts by requesting AAPL from Yahoo. If the request fails, it displays
+deterministic demo data. A Twelve Data key can be entered under **Provider
+fallback** for the current process only; it is cleared when the app exits.
+
+To build the APK locally, install Android Studio command-line tools/JDK 17+,
+then run:
+
+```powershell
+pwsh -NoProfile -File .\scripts\bootstrap-android.ps1
+pwsh -NoProfile -File .\scripts\package-android.ps1
+```
+
+The packaging script creates a signing key under
+`%LOCALAPPDATA%\TradingViewChart\signing` on first use, signs and verifies the
+release APK, and writes the APK plus checksum to `dist`. Back up that signing
+directory securely: Android upgrades must be signed by the same key.
+
+For CI or a disposable unsigned build:
+
+```powershell
+pwsh -NoProfile -File .\scripts\package-android.ps1 -SkipSigning
+```
 
 ## CSV format
 
