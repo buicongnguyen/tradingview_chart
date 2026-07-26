@@ -1,7 +1,9 @@
-# TradingView Chart
+# TradeChart Lab
 
 An online-capable C++20/Qt 6 chart viewer for Windows and Android, powered by
 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts).
+TradeChart Lab is an independent project and is not affiliated with or endorsed
+by TradingView.
 
 The application does **not** require Alpaca, a broker account, or an application
 backend. It requests the active symbol from Yahoo Finance first. If that request
@@ -12,7 +14,22 @@ demo data. Local OHLCV CSV import remains available.
 Lightweight Charts is only the renderer. Provider availability, freshness,
 rate limits, terms, and market-data display rights still apply.
 
-## Version 1.0 features
+## Version 1.1 features
+
+- Basic, Intermediate, and Advanced desktop workspaces under **Tools**. Basic
+  keeps the chart, watchlist, summary, interval, and style controls; Intermediate
+  adds indicators, data quality, research, risk, structure, scale, and price
+  levels; Advanced adds comparison, fundamentals, margin, portfolio, and the
+  Strategy Lab. **Tools → Panels** supports a saved Custom arrangement, and
+  **Ctrl+Shift+0** repairs the dock layout without changing the selected panels.
+
+- A point-in-time Theory Validation Lab under **Tools** and Strategy Lab. It
+  compares the current editor and saved strategy entry theories through a
+  selected completed moment, models non-overlapping next-open 5/20-bar event
+  outcomes, uses a chronological holdout, reports Wilson hit-rate intervals,
+  unconditional baseline/excess return, and separates sample reliability from
+  positive, mixed, or negative historical evidence. It does not optimize rules
+  or estimate a probability of future profit.
 
 - Confirmed-pivot Market Structure analysis with ATR-normalized support and
   resistance zones, trendlines/channels, double tops/bottoms, triangles,
@@ -63,6 +80,15 @@ rate limits, terms, and market-data display rights still apply.
   conditions, completed-bar evaluation, next-open execution, commissions,
   slippage, fractional-share control, deterministic replay, cached-watchlist
   scanning, and optional training/holdout results.
+- An interactive long-only Trading Simulator with a configurable starting
+  balance, automatic/manual/assisted decisions, step or timed playback,
+  next-open fills, mark-to-market equity and drawdown, trade/decision audit
+  tables, and strictly validated local resume snapshots. It is a hypothetical
+  paper environment and never sends orders to a broker.
+- A Safe Script Lab that parses a bounded, documented Pine-style strategy
+  subset into the same native rule model. Script text is never executed.
+  Unsupported language, sizing, short, stop, limit, or order semantics are
+  compile errors rather than approximations.
 - Expanded backtest diagnostics: reconciled trade/equity records, drawdown,
   exposure, MAE/MFE, holding time, CAGR, Sharpe, Sortino, Calmar,
   buy-and-hold comparison, consecutive losses, and underwater duration.
@@ -122,7 +148,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradingViewChart-1.0.0-win64\tradingview_chart.exe
+.\dist\TradeChartLab-1.1.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -141,7 +167,7 @@ Set a key before starting the application, then use the **Research** dock's
 
 ```powershell
 $env:ALPHA_VANTAGE_API_KEY = 'your-key'
-.\dist\TradingViewChart-1.0.0-win64\tradingview_chart.exe
+.\dist\TradeChartLab-1.1.0-win64\tradingview_chart.exe
 ```
 
 The refresh retrieves the selected company's overview followed by its earnings
@@ -186,7 +212,7 @@ endpoints. Before choosing **Refresh SEC CompanyFacts**, set a contact-bearing
 identity:
 
 ```powershell
-$env:SEC_USER_AGENT = 'TradingViewChart personal research your-email@example.com'
+$env:SEC_USER_AGENT = 'TradeChartLab personal research your-email@example.com'
 ```
 
 Accepted facts are stored locally in a separate `fundamentals.sqlite` database
@@ -292,11 +318,63 @@ Backtests use these conservative execution rules:
 The editor supports up to 16 conditions in each all/any entry and exit group,
 and the same definition drives backtests, scans, and strategy alerts. Holdout
 mode preserves pre-split indicator warm-up but does not permit pre-split trades
-to leak into the holdout result. Version 0.7 aligns optional cached
+to leak into the holdout result. The engine aligns optional cached
 higher-timeframe values only after the source bar has closed and can derive
 split/total-return Yahoo views without putting adjusted values into the raw
 cache. It does not claim short selling, tax-lot optimization,
 background/mobile alert delivery, or broker execution.
+
+### Trading Simulator
+
+Open **Tools → Trading Simulator** in the desktop application. Choose a
+completed starting moment, enter the initial cash and execution assumptions,
+then select one of these modes:
+
+- **Automatic** evaluates the current strategy after every completed bar and
+  queues an entry or exit for the following bar's open.
+- **Manual** ignores strategy signals; Buy and Sell queue the user's action for
+  the following open.
+- **Assisted** shows the strategy proposal and requires Approve or Reject before
+  it can be queued.
+
+The simulator never fills on the decision bar. Slippage worsens each fill,
+commission is charged on both sides, and account equity is marked at each
+visible close. Unlike a completed backtest, stopping at the selected moment
+does not force-close an open position; realized and unrealized results remain
+separate. The decision audit explains every signal, ignored action, proposal,
+fill, and rejection.
+
+Resume data is local and includes a fingerprint of the exact symbol, provider,
+timeframe, price basis, bar series, and strategy. If any source input changes,
+the snapshot is rejected instead of replayed against different history. The
+simulation is hypothetical, has no broker connection, and does not model
+liquidity, partial fills, taxes, borrowing, or short sales.
+
+### Safe Script Lab
+
+Open **Tools → Safe Script Lab** to translate a small Pine-style strategy
+subset into native Strategy Lab rules. The supported subset includes:
+
+- `//@version=5` or `//@version=6` and one `strategy(...)` declaration;
+- numeric `input.int` and `input.float` defaults;
+- OHLCV operands plus `ta.sma(close, n)`, `ta.ema(close, n)`, and
+  `ta.rsi(close, n)`;
+- `ta.crossover`, `ta.crossunder`, `>`, and `<` conditions joined by one flat
+  `and` or `or` group; and
+- long `strategy.entry` plus `strategy.close`, using `if` or `when`.
+
+The importer can map initial capital, percent-of-equity allocation, and fixed
+cash-per-order commission only when their meaning matches the native engine.
+It rejects short positions, history indexing, functions/loops, mutable state,
+`request.*`, `strategy.exit`/`strategy.order`, stop/limit orders, tick
+calculations, pyramiding above one, unsupported sizing, and nested mixed
+Boolean groups. Size, line, symbol, and condition limits bound the parser.
+
+This is a compatibility importer, not a Pine runtime: it does not execute
+scripts, render Pine plots, or promise identical TradingView results. Review
+the native preview and diagnostics before applying. Imported text stays in
+local application settings. Users are responsible for permission to copy or
+redistribute third-party scripts and for complying with their licenses.
 
 ## Portfolio, alerts, and comparison assumptions
 
@@ -354,7 +432,7 @@ the selected ticker to an SEC CIK and imports recent issuer filings. Set a
 contact-bearing identity before using filing or CompanyFacts refresh:
 
 ```powershell
-$env:SEC_USER_AGENT = 'TradingViewChart personal research your-email@example.com'
+$env:SEC_USER_AGENT = 'TradeChartLab personal research your-email@example.com'
 ```
 
 The manual FRED refresh imports selected major macro release dates over the next
@@ -474,10 +552,10 @@ not only the raw build output.
 ## Android APK
 
 The release page provides
-`TradingViewChart-1.0.0-android-arm64-v8a.apk` for typical modern Android
+`TradeChartLab-1.1.0-android-arm64-v8a.apk` for typical modern Android
 phones. Download it on the phone, verify its SHA-256 against the adjacent
 `.sha256` file, allow installation from the browser or file manager when
-Android prompts, and open **TradingView Chart**. Android may show a Play Protect
+Android prompts, and open **TradeChart Lab**. Android may show a Play Protect
 warning because this APK is distributed directly rather than through Google
 Play.
 

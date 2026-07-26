@@ -107,6 +107,98 @@
     },
   });
 
+  const maximumOverlayLabels = 6;
+  const overlayLabelHeight = 15;
+
+  function fitOverlayLabel(context, value, maximumWidth) {
+    const text = String(value ?? "");
+    if (context.measureText(text).width <= maximumWidth) {
+      return text;
+    }
+    let shortened = text;
+    while (
+      shortened.length > 1 &&
+      context.measureText(`${shortened}…`).width > maximumWidth
+    ) {
+      shortened = shortened.slice(0, -1);
+    }
+    return `${shortened}…`;
+  }
+
+  function drawOverlayLabels(context, mediaSize, candidates) {
+    const placed = [];
+    const identities = new Set();
+    const maximumWidth = Math.max(80, Math.min(220, mediaSize.width - 12));
+    for (const candidate of candidates) {
+      if (
+        placed.length >= maximumOverlayLabels ||
+        candidate.title.length === 0 ||
+        identities.has(candidate.title)
+      ) {
+        continue;
+      }
+      identities.add(candidate.title);
+      const title = fitOverlayLabel(
+        context,
+        candidate.title,
+        maximumWidth - 8,
+      );
+      const width = Math.min(
+        maximumWidth,
+        context.measureText(title).width + 8,
+      );
+      const x = Math.min(
+        Math.max(4, candidate.x + 4),
+        Math.max(4, mediaSize.width - width - 4),
+      );
+      const preferredY = Math.min(
+        Math.max(overlayLabelHeight, candidate.y),
+        mediaSize.height - 4,
+      );
+      let rectangle = null;
+      const offsets = [0, 15, -15, 30, -30, 45, -45, 60, -60];
+      for (const offset of offsets) {
+        const y = Math.min(
+          Math.max(overlayLabelHeight, preferredY + offset),
+          mediaSize.height - 4,
+        );
+        const proposed = {
+          left: x - 3,
+          right: x + width - 3,
+          top: y - overlayLabelHeight + 1,
+          bottom: y + 3,
+          y,
+        };
+        const overlaps = placed.some((existing) =>
+          proposed.left < existing.right + 3 &&
+          proposed.right > existing.left - 3 &&
+          proposed.top < existing.bottom + 2 &&
+          proposed.bottom > existing.top - 2);
+        if (!overlaps) {
+          rectangle = proposed;
+          break;
+        }
+      }
+      if (rectangle === null) {
+        continue;
+      }
+      context.globalAlpha = 0.82;
+      context.fillStyle = dark
+        ? "rgba(19, 23, 34, 0.92)"
+        : "rgba(255, 255, 255, 0.92)";
+      context.fillRect(
+        rectangle.left,
+        rectangle.top,
+        width,
+        overlayLabelHeight + 2,
+      );
+      context.globalAlpha = 1;
+      context.fillStyle = candidate.color;
+      context.fillText(title, x + 1, rectangle.y);
+      placed.push(rectangle);
+    }
+  }
+
   class MarketStructureRenderer {
     constructor(primitive) {
       this.primitive = primitive;
@@ -119,6 +211,7 @@
       }
       target.useMediaCoordinateSpace(({ context, mediaSize }) => {
         const timeScale = primitive.chart.timeScale();
+        const labelCandidates = [];
         context.save();
         context.font = '11px Inter, "Segoe UI", system-ui, sans-serif';
         context.textBaseline = "bottom";
@@ -143,13 +236,12 @@
           context.setLineDash([4, 3]);
           context.strokeRect(left, top, width, height);
           if (left < mediaSize.width && left + width > 0) {
-            context.globalAlpha = 0.9;
-            context.fillStyle = zone.color;
-            context.fillText(
-              zone.title,
-              Math.max(4, left + 4),
-              Math.max(13, top - 2),
-            );
+            labelCandidates.push({
+              title: zone.title,
+              color: zone.color,
+              x: Math.max(0, left),
+              y: Math.max(overlayLabelHeight, top - 2),
+            });
           }
         }
         context.globalAlpha = 0.9;
@@ -175,10 +267,15 @@
             y2 >= 12 &&
             y2 <= mediaSize.height
           ) {
-            context.fillStyle = line.color;
-            context.fillText(line.title, Math.max(4, x2 + 4), y2 - 2);
+            labelCandidates.push({
+              title: line.title,
+              color: line.color,
+              x: x2,
+              y: y2 - 2,
+            });
           }
         }
+        drawOverlayLabels(context, mediaSize, labelCandidates);
         context.restore();
       });
     }

@@ -35,6 +35,7 @@ public:
     void setIndicators(std::vector<IndicatorCalculation> calculations);
     void setResearchEvents(std::vector<ResearchEvent> events);
     void setMarketStructure(MarketStructureReport report);
+    void setMarketStructureVisible(bool visible);
     bool setPriceLevels(std::vector<ChartPriceLevel> levels);
     void setVisibleRange(std::int64_t from, std::int64_t to);
     void setCrosshairTime(std::int64_t timestamp);
@@ -91,6 +92,7 @@ private:
     std::vector<ChartPriceLevel> priceLevels_;
     bool dark_{true};
     bool ready_{false};
+    bool marketStructureVisible_{true};
 };
 
 } // namespace tvchart

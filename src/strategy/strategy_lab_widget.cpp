@@ -22,11 +22,13 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSpinBox>
 #include <QStyle>
 #include <QSystemTrayIcon>
 #include <QTabWidget>
 #include <QTableWidget>
+#include <QTextEdit>
 #include <QTimer>
 #include <QTime>
 #include <QTimeZone>
@@ -154,7 +156,8 @@ StrategyLabWidget::StrategyLabWidget(
 void StrategyLabWidget::buildUi() {
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(6, 6, 6, 6);
-    auto* tabs = new QTabWidget(this);
+    tabs_ = new QTabWidget(this);
+    auto* tabs = tabs_;
     root->addWidget(tabs);
 
     auto* backtest = new QWidget(tabs);
@@ -526,6 +529,559 @@ void StrategyLabWidget::buildUi() {
         [this](int) { emit workspaceChanged(); });
     tabs->addTab(replayTab, tr("Replay"));
 
+    simulationTab_ = new QWidget(tabs);
+    auto* simulationLayout = new QVBoxLayout(simulationTab_);
+    auto* simulationExplanation = new QLabel(
+        tr("Start with a local cash balance at a historical moment, reveal "
+           "completed candles one at a time, and execute accepted market "
+           "orders at the following candle open. This is not a broker or "
+           "live paper-trading account."),
+        simulationTab_);
+    simulationExplanation->setWordWrap(true);
+    simulationLayout->addWidget(simulationExplanation);
+
+    auto* simulationForm = new QFormLayout;
+    simulationStart_ = new QDateTimeEdit(
+        QDateTime::currentDateTimeUtc(),
+        simulationTab_);
+    simulationStart_->setObjectName(
+        QStringLiteral("simulationStartDateTime"));
+    simulationStart_->setDisplayFormat(
+        QStringLiteral("yyyy-MM-dd HH:mm 'UTC'"));
+    simulationStart_->setTimeZone(QTimeZone::UTC);
+    simulationStart_->setCalendarPopup(true);
+    simulationForm->addRow(tr("Start at completed candle"), simulationStart_);
+    simulationMode_ = new QComboBox(simulationTab_);
+    simulationMode_->setObjectName(QStringLiteral("simulationMode"));
+    for (const auto mode : {
+             SimulationMode::Automatic,
+             SimulationMode::Manual,
+             SimulationMode::Assisted,
+         }) {
+        simulationMode_->addItem(
+            simulationModeLabel(mode),
+            static_cast<int>(mode));
+    }
+    simulationForm->addRow(tr("Mode"), simulationMode_);
+    simulationSpeed_ = new QComboBox(simulationTab_);
+    simulationSpeed_->addItem(tr("Slow · 1 second"), 1'000);
+    simulationSpeed_->addItem(tr("Normal · 400 ms"), 400);
+    simulationSpeed_->addItem(tr("Fast · 100 ms"), 100);
+    simulationSpeed_->setCurrentIndex(1);
+    simulationForm->addRow(tr("Playback speed"), simulationSpeed_);
+    simulationLayout->addLayout(simulationForm);
+
+    auto* simulationMomentActions = new QHBoxLayout;
+    auto* simulationLatest =
+        new QPushButton(tr("Use latest moment"), simulationTab_);
+    auto* simulationReplayMoment =
+        new QPushButton(tr("Use Replay moment"), simulationTab_);
+    simulationMomentActions->addWidget(simulationLatest);
+    simulationMomentActions->addWidget(simulationReplayMoment);
+    simulationMomentActions->addStretch();
+    simulationLayout->addLayout(simulationMomentActions);
+    connect(
+        simulationLatest,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::useLatestSimulationMoment);
+    connect(
+        simulationReplayMoment,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::useReplaySimulationMoment);
+
+    auto* simulationActions = new QHBoxLayout;
+    auto* simulationStart =
+        new QPushButton(tr("Start / reset"), simulationTab_);
+    simulationStart->setObjectName(
+        QStringLiteral("simulationStartButton"));
+    auto* simulationResume =
+        new QPushButton(tr("Resume saved"), simulationTab_);
+    auto* simulationStep =
+        new QPushButton(tr("Step"), simulationTab_);
+    simulationPlay_ = new QPushButton(tr("Play"), simulationTab_);
+    auto* simulationStop =
+        new QPushButton(tr("Stop / restore chart"), simulationTab_);
+    simulationActions->addWidget(simulationStart);
+    simulationActions->addWidget(simulationResume);
+    simulationActions->addWidget(simulationStep);
+    simulationActions->addWidget(simulationPlay_);
+    simulationActions->addWidget(simulationStop);
+    simulationLayout->addLayout(simulationActions);
+    connect(
+        simulationStart,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::startSimulation);
+    connect(
+        simulationResume,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::resumeSimulation);
+    connect(
+        simulationStep,
+        &QPushButton::clicked,
+        this,
+        [this] { stepSimulation(); });
+    connect(
+        simulationPlay_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            if (!simulation_.active()) {
+                startSimulation();
+            }
+            if (!simulation_.active()) {
+                return;
+            }
+            if (simulationTimer_->isActive()) {
+                simulationTimer_->stop();
+                simulationPlay_->setText(tr("Play"));
+            } else if (!simulation_.account().finished) {
+                simulationTimer_->start(
+                    simulationSpeed_->currentData().toInt());
+                simulationPlay_->setText(tr("Pause"));
+            }
+        });
+    connect(
+        simulationStop,
+        &QPushButton::clicked,
+        this,
+        [this] { stopSimulation(true, false); });
+
+    auto* simulationOrderActions = new QHBoxLayout;
+    simulationBuy_ = new QPushButton(tr("Buy next open"), simulationTab_);
+    simulationSell_ = new QPushButton(tr("Sell next open"), simulationTab_);
+    simulationApprove_ = new QPushButton(tr("Approve proposal"), simulationTab_);
+    simulationReject_ = new QPushButton(tr("Reject proposal"), simulationTab_);
+    simulationOrderActions->addWidget(simulationBuy_);
+    simulationOrderActions->addWidget(simulationSell_);
+    simulationOrderActions->addWidget(simulationApprove_);
+    simulationOrderActions->addWidget(simulationReject_);
+    simulationOrderActions->addStretch();
+    simulationLayout->addLayout(simulationOrderActions);
+    connect(
+        simulationBuy_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            const auto error = simulation_.requestManualAction(
+                SimulationAction::Enter);
+            if (!error.isEmpty()) {
+                emit statusMessage(error);
+            }
+            refreshSimulation();
+            refreshSimulationSnapshot();
+        });
+    connect(
+        simulationSell_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            const auto error = simulation_.requestManualAction(
+                SimulationAction::Exit);
+            if (!error.isEmpty()) {
+                emit statusMessage(error);
+            }
+            refreshSimulation();
+            refreshSimulationSnapshot();
+        });
+    connect(
+        simulationApprove_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            const auto error = simulation_.approveProposal();
+            if (!error.isEmpty()) {
+                emit statusMessage(error);
+            }
+            refreshSimulation();
+            refreshSimulationSnapshot();
+        });
+    connect(
+        simulationReject_,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            const auto error = simulation_.rejectProposal();
+            if (!error.isEmpty()) {
+                emit statusMessage(error);
+            }
+            refreshSimulation();
+            refreshSimulationSnapshot();
+        });
+
+    simulationSummary_ = new QLabel(
+        tr("Simulation is inactive. Execution assumptions come from Backtest."),
+        simulationTab_);
+    simulationSummary_->setObjectName(
+        QStringLiteral("simulationAccountSummary"));
+    simulationSummary_->setWordWrap(true);
+    simulationSummary_->setTextInteractionFlags(
+        Qt::TextSelectableByMouse);
+    simulationLayout->addWidget(simulationSummary_);
+    simulationRule_ = new QLabel(
+        tr("No completed-candle rule has been evaluated."),
+        simulationTab_);
+    simulationRule_->setWordWrap(true);
+    simulationLayout->addWidget(simulationRule_);
+
+    auto* simulationResults = new QTabWidget(simulationTab_);
+    simulationTrades_ = new QTableWidget(0, 8, simulationResults);
+    simulationTrades_->setHorizontalHeaderLabels({
+        tr("Entry UTC"),
+        tr("Exit UTC"),
+        tr("Quantity"),
+        tr("Entry"),
+        tr("Exit"),
+        tr("P/L"),
+        tr("Return"),
+        tr("Bars"),
+    });
+    simulationDecisions_ = new QTableWidget(0, 5, simulationResults);
+    simulationDecisions_->setObjectName(
+        QStringLiteral("simulationDecisionTable"));
+    simulationDecisions_->setHorizontalHeaderLabels({
+        tr("Moment UTC"),
+        tr("Action"),
+        tr("Origin"),
+        tr("State"),
+        tr("Detail"),
+    });
+    for (auto* table : {
+             simulationTrades_,
+             simulationDecisions_,
+         }) {
+        table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        table->setSelectionBehavior(QAbstractItemView::SelectRows);
+        table->horizontalHeader()->setSectionResizeMode(
+            QHeaderView::ResizeToContents);
+        table->horizontalHeader()->setStretchLastSection(true);
+    }
+    simulationResults->addTab(simulationTrades_, tr("Trades"));
+    simulationResults->addTab(simulationDecisions_, tr("Decision audit"));
+    simulationLayout->addWidget(simulationResults, 1);
+    auto* simulationDisclaimer = new QLabel(
+        tr("Long-only educational simulation. Open positions at the final "
+           "available candle remain marked to market and are not silently "
+           "force-closed."),
+        simulationTab_);
+    simulationDisclaimer->setWordWrap(true);
+    simulationDisclaimer->setStyleSheet(
+        QStringLiteral("color: #8c8c8c;"));
+    simulationLayout->addWidget(simulationDisclaimer);
+
+    simulationTimer_ = new QTimer(this);
+    connect(
+        simulationTimer_,
+        &QTimer::timeout,
+        this,
+        [this] { stepSimulation(); });
+    connect(
+        simulationSpeed_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int) {
+            if (simulationTimer_->isActive()) {
+                simulationTimer_->start(
+                    simulationSpeed_->currentData().toInt());
+            }
+            emit workspaceChanged();
+        });
+    connect(
+        simulationStart_,
+        &QDateTimeEdit::dateTimeChanged,
+        this,
+        [this](const QDateTime&) { emit workspaceChanged(); });
+    connect(
+        simulationMode_,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int) { emit workspaceChanged(); });
+    tabs->addTab(simulationTab_, tr("Simulation"));
+
+    theoryTab_ = new QWidget(tabs);
+    auto* theoryLayout = new QVBoxLayout(theoryTab_);
+    auto* theoryExplanation = new QLabel(
+        tr("Compare the current editor and saved theories using only completed "
+           "information available at the selected moment. Occurrences are "
+           "entry-rule transitions, modeled at the next open, and kept "
+           "non-overlapping through the 20-bar outcome window."),
+        theoryTab_);
+    theoryExplanation->setWordWrap(true);
+    theoryLayout->addWidget(theoryExplanation);
+
+    auto* theoryControls = new QFormLayout;
+    theoryAsOf_ = new QDateTimeEdit(
+        QDateTime::currentDateTimeUtc(),
+        theoryTab_);
+    theoryAsOf_->setObjectName(
+        QStringLiteral("theoryAsOfDateTime"));
+    theoryAsOf_->setDisplayFormat(
+        QStringLiteral("yyyy-MM-dd HH:mm 'UTC'"));
+    theoryAsOf_->setTimeZone(QTimeZone::UTC);
+    theoryAsOf_->setCalendarPopup(true);
+    theoryControls->addRow(tr("Analyze through"), theoryAsOf_);
+
+    theoryMinimumSamples_ = new QSpinBox(theoryTab_);
+    theoryMinimumSamples_->setObjectName(
+        QStringLiteral("theoryMinimumSamples"));
+    theoryMinimumSamples_->setRange(10, 1'000);
+    theoryMinimumSamples_->setValue(30);
+    theoryControls->addRow(
+        tr("Minimum samples"),
+        theoryMinimumSamples_);
+
+    theoryHoldoutPercent_ = new QSpinBox(theoryTab_);
+    theoryHoldoutPercent_->setObjectName(
+        QStringLiteral("theoryHoldoutPercent"));
+    theoryHoldoutPercent_->setRange(10, 50);
+    theoryHoldoutPercent_->setValue(30);
+    theoryHoldoutPercent_->setSuffix(QStringLiteral("%"));
+    theoryControls->addRow(
+        tr("Chronological holdout"),
+        theoryHoldoutPercent_);
+
+    theoryRoundTripCost_ = new QDoubleSpinBox(theoryTab_);
+    theoryRoundTripCost_->setObjectName(
+        QStringLiteral("theoryRoundTripCost"));
+    theoryRoundTripCost_->setRange(0.0, 1'000.0);
+    theoryRoundTripCost_->setDecimals(2);
+    theoryRoundTripCost_->setSuffix(tr(" bps"));
+    theoryControls->addRow(
+        tr("Round-trip cost"),
+        theoryRoundTripCost_);
+    theoryLayout->addLayout(theoryControls);
+
+    auto* theoryActions = new QHBoxLayout;
+    auto* latestTheoryMoment =
+        new QPushButton(tr("Use latest completed bar"), theoryTab_);
+    auto* replayTheoryMoment =
+        new QPushButton(tr("Use Replay moment"), theoryTab_);
+    auto* analyzeTheories =
+        new QPushButton(tr("Analyze current + saved theories"), theoryTab_);
+    analyzeTheories->setObjectName(
+        QStringLiteral("theoryAnalyzeButton"));
+    theoryActions->addWidget(latestTheoryMoment);
+    theoryActions->addWidget(replayTheoryMoment);
+    theoryActions->addWidget(analyzeTheories);
+    theoryActions->addStretch();
+    theoryLayout->addLayout(theoryActions);
+    connect(
+        latestTheoryMoment,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::useLatestTheoryMoment);
+    connect(
+        replayTheoryMoment,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::useReplayTheoryMoment);
+    connect(
+        analyzeTheories,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::runTheoryValidation);
+
+    theorySummary_ = new QLabel(
+        tr("Choose a completed moment, then analyze the theories."),
+        theoryTab_);
+    theorySummary_->setObjectName(
+        QStringLiteral("theoryValidationSummary"));
+    theorySummary_->setWordWrap(true);
+    theorySummary_->setTextInteractionFlags(
+        Qt::TextSelectableByMouse);
+    theoryLayout->addWidget(theorySummary_);
+
+    theoryTable_ = new QTableWidget(0, 15, theoryTab_);
+    theoryTable_->setObjectName(
+        QStringLiteral("theoryValidationTable"));
+    theoryTable_->setHorizontalHeaderLabels({
+        tr("Rank"),
+        tr("Theory"),
+        tr("At moment"),
+        tr("Samples"),
+        tr("5-bar hit"),
+        tr("20-bar hit"),
+        tr("20-bar avg"),
+        tr("Baseline"),
+        tr("Excess"),
+        tr("Holdout n"),
+        tr("Holdout hit"),
+        tr("Holdout avg"),
+        tr("95% hit CI"),
+        tr("Reliability"),
+        tr("Evidence"),
+    });
+    theoryTable_->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+    theoryTable_->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+    theoryTable_->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+    theoryTable_->verticalHeader()->setVisible(false);
+    theoryTable_->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::ResizeToContents);
+    theoryTable_->horizontalHeader()->setStretchLastSection(true);
+    theoryTable_->horizontalHeaderItem(7)->setToolTip(
+        tr("Unconditional average modeled 20-bar return for the same symbol "
+           "through the selected moment."));
+    theoryTable_->horizontalHeaderItem(8)->setToolTip(
+        tr("Theory average 20-bar return minus the unconditional baseline."));
+    theoryTable_->horizontalHeaderItem(12)->setToolTip(
+        tr("95% Wilson interval for the chronological holdout hit rate."));
+    theoryTable_->horizontalHeaderItem(13)->setToolTip(
+        tr("Sample-coverage reliability; this is not profitability."));
+    theoryTable_->horizontalHeaderItem(14)->setToolTip(
+        tr("Positive, mixed, or negative historical evidence after holdout "
+           "and baseline checks."));
+    theoryLayout->addWidget(theoryTable_, 1);
+    connect(
+        theoryTable_,
+        &QTableWidget::itemSelectionChanged,
+        this,
+        &StrategyLabWidget::refreshTheoryDetail);
+
+    theoryDetail_ = new QLabel(
+        tr("Select a result to inspect its point-in-time evidence."),
+        theoryTab_);
+    theoryDetail_->setObjectName(
+        QStringLiteral("theoryValidationDetail"));
+    theoryDetail_->setWordWrap(true);
+    theoryDetail_->setTextInteractionFlags(
+        Qt::TextSelectableByMouse);
+    theoryLayout->addWidget(theoryDetail_);
+    auto* theoryDisclaimer = new QLabel(
+        tr("Historical evidence only. Reliability describes sample coverage, "
+           "not the probability of future profit. Comparing many theories "
+           "after seeing their results can overfit the history."),
+        theoryTab_);
+    theoryDisclaimer->setWordWrap(true);
+    theoryDisclaimer->setStyleSheet(
+        QStringLiteral("color: #8c8c8c;"));
+    theoryLayout->addWidget(theoryDisclaimer);
+    tabs->addTab(theoryTab_, tr("Theory"));
+
+    scriptTab_ = new QWidget(tabs);
+    auto* scriptLayout = new QVBoxLayout(scriptTab_);
+    auto* scriptExplanation = new QLabel(
+        tr("Paste a user-authored or appropriately licensed Pine-style "
+           "strategy. The safe importer parses a documented subset into "
+           "native rules; it never executes pasted code and is not an "
+           "official TradingView runtime."),
+        scriptTab_);
+    scriptExplanation->setWordWrap(true);
+    scriptLayout->addWidget(scriptExplanation);
+    scriptSource_ = new QTextEdit(scriptTab_);
+    scriptSource_->setObjectName(QStringLiteral("scriptSourceEditor"));
+    scriptSource_->setAcceptRichText(false);
+    scriptSource_->setLineWrapMode(QTextEdit::NoWrap);
+    scriptSource_->setPlaceholderText(pineStrategyExample());
+    scriptSource_->document()->setMaximumBlockCount(1'000);
+    scriptLayout->addWidget(scriptSource_, 2);
+    auto* scriptActions = new QHBoxLayout;
+    auto* scriptExample =
+        new QPushButton(tr("Load safe example"), scriptTab_);
+    auto* scriptCompile =
+        new QPushButton(tr("Compile"), scriptTab_);
+    scriptCompile->setObjectName(
+        QStringLiteral("scriptCompileButton"));
+    scriptApply_ =
+        new QPushButton(tr("Apply native rules"), scriptTab_);
+    scriptApply_->setObjectName(QStringLiteral("scriptApplyButton"));
+    scriptApply_->setEnabled(false);
+    scriptActions->addWidget(scriptExample);
+    scriptActions->addWidget(scriptCompile);
+    scriptActions->addWidget(scriptApply_);
+    scriptActions->addStretch();
+    scriptLayout->addLayout(scriptActions);
+    connect(
+        scriptExample,
+        &QPushButton::clicked,
+        this,
+        [this] {
+            scriptSource_->setPlainText(pineStrategyExample());
+            compileScript();
+        });
+    connect(
+        scriptCompile,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::compileScript);
+    connect(
+        scriptApply_,
+        &QPushButton::clicked,
+        this,
+        &StrategyLabWidget::applyImportedScript);
+    connect(
+        scriptSource_,
+        &QTextEdit::textChanged,
+        this,
+        [this] {
+            scriptApply_->setEnabled(false);
+            scriptSummary_->setText(
+                tr("Source changed; compile again before applying."));
+            emit workspaceChanged();
+        });
+    scriptSummary_ = new QLabel(
+        tr("Load the safe example or paste a supported strategy."),
+        scriptTab_);
+    scriptSummary_->setObjectName(QStringLiteral("scriptCompileSummary"));
+    scriptSummary_->setWordWrap(true);
+    scriptSummary_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    scriptLayout->addWidget(scriptSummary_);
+    scriptDiagnostics_ = new QTableWidget(0, 4, scriptTab_);
+    scriptDiagnostics_->setObjectName(
+        QStringLiteral("scriptDiagnosticsTable"));
+    scriptDiagnostics_->setHorizontalHeaderLabels({
+        tr("Severity"),
+        tr("Line"),
+        tr("Column"),
+        tr("Message"),
+    });
+    scriptDiagnostics_->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+    scriptDiagnostics_->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::ResizeToContents);
+    scriptDiagnostics_->horizontalHeader()->setStretchLastSection(true);
+    scriptLayout->addWidget(scriptDiagnostics_, 1);
+    auto* scriptDisclaimer = new QLabel(
+        tr("Supported subset: v5/v6 strategy declaration, numeric inputs, "
+           "OHLCV, SMA/EMA/RSI, strict comparisons, crossovers, flat and/or, "
+           "long entry, and close. Unsupported behavior is rejected with a "
+           "line diagnostic instead of approximated."),
+        scriptTab_);
+    scriptDisclaimer->setWordWrap(true);
+    scriptDisclaimer->setStyleSheet(
+        QStringLiteral("color: #8c8c8c;"));
+    scriptLayout->addWidget(scriptDisclaimer);
+    tabs->addTab(scriptTab_, tr("Script"));
+
+    const auto persistTheorySettings = [this] {
+        emit workspaceChanged();
+    };
+    connect(
+        theoryAsOf_,
+        &QDateTimeEdit::dateTimeChanged,
+        this,
+        persistTheorySettings);
+    connect(
+        theoryMinimumSamples_,
+        qOverload<int>(&QSpinBox::valueChanged),
+        this,
+        persistTheorySettings);
+    connect(
+        theoryHoldoutPercent_,
+        qOverload<int>(&QSpinBox::valueChanged),
+        this,
+        persistTheorySettings);
+    connect(
+        theoryRoundTripCost_,
+        qOverload<double>(&QDoubleSpinBox::valueChanged),
+        this,
+        persistTheorySettings);
+
     auto* scanner = new QWidget(tabs);
     auto* scannerLayout = new QVBoxLayout(scanner);
     scannerStatus_ = new QLabel(
@@ -716,8 +1272,9 @@ void StrategyLabWidget::buildUi() {
     trayIcon_ = new QSystemTrayIcon(
         QApplication::style()->standardIcon(QStyle::SP_MessageBoxInformation),
         this);
-    trayIcon_->setToolTip(tr("TradingView Chart foreground alerts"));
+    trayIcon_->setToolTip(tr("TradeChart Lab foreground alerts"));
     tabs->addTab(alerts, tr("Alerts"));
+    refreshSimulation();
 }
 
 QWidget* StrategyLabWidget::buildRuleEditor(
@@ -1168,6 +1725,8 @@ void StrategyLabWidget::applyStrategy(const StrategyDefinition& strategy) {
     const auto libraryIndex = strategyLibrary_->findData(strategy.id);
     if (libraryIndex >= 0) {
         strategyLibrary_->setCurrentIndex(libraryIndex);
+    } else {
+        strategyLibrary_->setCurrentIndex(-1);
     }
 }
 
@@ -1285,6 +1844,7 @@ void StrategyLabWidget::setCurrentSeries(
     MarketDataMetadata metadata,
     Bars rawCacheBars) {
     stopReplay(false);
+    stopSimulation(false, true);
     symbol_ = std::move(symbol);
     timeframe_ = timeframe;
     provider_ = std::move(provider);
@@ -1297,6 +1857,8 @@ void StrategyLabWidget::setCurrentSeries(
         std::min(
             static_cast<int>(bars_.size()),
             std::max(1, replayWarmup_->value())));
+    updateTheoryMomentRange();
+    updateSimulationMomentRange();
 
     if (historyStore_ && historyStore_->isOpen() &&
         metadata_.deliveryMode == DataDeliveryMode::Polled &&
@@ -1371,8 +1933,78 @@ void StrategyLabWidget::restoreSettings(QSettings& settings) {
     holdoutPercent_->setValue(
         settings.value(QStringLiteral("strategyLab/holdoutPercent"), 30)
             .toInt());
+    theoryAsOf_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            settings
+                .value(
+                    QStringLiteral("strategyLab/theoryAsOfUtc"),
+                    QDateTime::currentSecsSinceEpoch())
+                .toLongLong(),
+            QTimeZone::UTC));
+    theoryMinimumSamples_->setValue(
+        settings
+            .value(
+                QStringLiteral("strategyLab/theoryMinimumSamples"),
+                30)
+            .toInt());
+    theoryHoldoutPercent_->setValue(
+        settings
+            .value(
+                QStringLiteral("strategyLab/theoryHoldoutPercent"),
+                30)
+            .toInt());
+    theoryRoundTripCost_->setValue(
+        settings
+            .value(
+                QStringLiteral("strategyLab/theoryRoundTripCostBps"),
+                0.0)
+            .toDouble());
     replayWarmup_->setValue(
         settings.value(QStringLiteral("strategyLab/replayWarmup"), 100).toInt());
+    simulationStart_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            settings
+                .value(
+                    QStringLiteral("strategyLab/simulationStartUtc"),
+                    QDateTime::currentSecsSinceEpoch())
+                .toLongLong(),
+            QTimeZone::UTC));
+    const auto simulationMode =
+        settings
+            .value(
+                QStringLiteral("strategyLab/simulationMode"),
+                static_cast<int>(SimulationMode::Automatic))
+            .toInt();
+    const auto simulationModeIndex =
+        simulationMode_->findData(simulationMode);
+    if (simulationModeIndex >= 0) {
+        simulationMode_->setCurrentIndex(simulationModeIndex);
+    }
+    const auto simulationSpeed =
+        settings
+            .value(
+                QStringLiteral("strategyLab/simulationSpeedMs"),
+                400)
+            .toInt();
+    const auto simulationSpeedIndex =
+        simulationSpeed_->findData(simulationSpeed);
+    if (simulationSpeedIndex >= 0) {
+        simulationSpeed_->setCurrentIndex(simulationSpeedIndex);
+    }
+    savedSimulationSnapshot_ =
+        settings
+            .value(QStringLiteral("strategyLab/simulationSnapshot"))
+            .toByteArray();
+    const auto savedScript =
+        settings
+            .value(QStringLiteral("strategyLab/scriptSource"))
+            .toString();
+    if (!savedScript.isEmpty()) {
+        const QSignalBlocker blocker(scriptSource_);
+        scriptSource_->setPlainText(savedScript);
+        scriptSummary_->setText(
+            tr("Saved local source restored; compile before applying."));
+    }
     alertEnabled_->setChecked(
         settings.value(QStringLiteral("strategyLab/alertEnabled"), false).toBool());
     eventReminderEnabled_->setChecked(
@@ -1423,8 +2055,38 @@ void StrategyLabWidget::saveSettings(QSettings& settings) const {
         QStringLiteral("strategyLab/holdoutPercent"),
         holdoutPercent_->value());
     settings.setValue(
+        QStringLiteral("strategyLab/theoryAsOfUtc"),
+        theoryAsOf_->dateTime().toUTC().toSecsSinceEpoch());
+    settings.setValue(
+        QStringLiteral("strategyLab/theoryMinimumSamples"),
+        theoryMinimumSamples_->value());
+    settings.setValue(
+        QStringLiteral("strategyLab/theoryHoldoutPercent"),
+        theoryHoldoutPercent_->value());
+    settings.setValue(
+        QStringLiteral("strategyLab/theoryRoundTripCostBps"),
+        theoryRoundTripCost_->value());
+    settings.setValue(
         QStringLiteral("strategyLab/replayWarmup"),
         replayWarmup_->value());
+    settings.setValue(
+        QStringLiteral("strategyLab/simulationStartUtc"),
+        simulationStart_->dateTime().toUTC().toSecsSinceEpoch());
+    settings.setValue(
+        QStringLiteral("strategyLab/simulationMode"),
+        simulationMode_->currentData().toInt());
+    settings.setValue(
+        QStringLiteral("strategyLab/simulationSpeedMs"),
+        simulationSpeed_->currentData().toInt());
+    settings.setValue(
+        QStringLiteral("strategyLab/simulationSnapshot"),
+        simulation_.active()
+            ? serializeSimulationSnapshot(
+                  simulation_.snapshot(symbol_, provider_))
+            : savedSimulationSnapshot_);
+    settings.setValue(
+        QStringLiteral("strategyLab/scriptSource"),
+        scriptSource_->toPlainText());
     settings.setValue(
         QStringLiteral("strategyLab/alertEnabled"),
         alertEnabled_->isChecked());
@@ -1444,6 +2106,422 @@ void StrategyLabWidget::saveSettings(QSettings& settings) const {
 
 void StrategyLabWidget::restoreChartIfReplaying() {
     stopReplay(true);
+    stopSimulation(true, false);
+}
+
+void StrategyLabWidget::showTheoryValidation() {
+    updateTheoryMomentRange();
+    if (tabs_ && theoryTab_) {
+        tabs_->setCurrentWidget(theoryTab_);
+    }
+}
+
+void StrategyLabWidget::showTradingSimulation() {
+    updateSimulationMomentRange();
+    if (tabs_ && simulationTab_) {
+        tabs_->setCurrentWidget(simulationTab_);
+    }
+}
+
+void StrategyLabWidget::showScriptLab() {
+    if (tabs_ && scriptTab_) {
+        tabs_->setCurrentWidget(scriptTab_);
+    }
+}
+
+void StrategyLabWidget::updateTheoryMomentRange() {
+    if (!theoryAsOf_) {
+        return;
+    }
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        theoryAsOf_->setEnabled(false);
+        return;
+    }
+    const auto minimum =
+        QDateTime::fromSecsSinceEpoch(
+            completed.front().timestamp,
+            QTimeZone::UTC);
+    const auto maximum =
+        QDateTime::fromSecsSinceEpoch(
+            completed.back().timestamp,
+            QTimeZone::UTC);
+    const auto selected = theoryAsOf_->dateTime();
+    const auto outsideRange =
+        selected < minimum || selected > maximum;
+    const QSignalBlocker blocker(theoryAsOf_);
+    theoryAsOf_->setEnabled(true);
+    theoryAsOf_->setDateTimeRange(minimum, maximum);
+    if (outsideRange) {
+        theoryAsOf_->setDateTime(maximum);
+    }
+}
+
+void StrategyLabWidget::useLatestTheoryMoment() {
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        theorySummary_->setText(
+            tr("No completed series is loaded."));
+        return;
+    }
+    theoryAsOf_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            completed.back().timestamp,
+            QTimeZone::UTC));
+}
+
+void StrategyLabWidget::useReplayTheoryMoment() {
+    if (!replayActive_ || replay_.visibleCount() == 0) {
+        theorySummary_->setText(
+            tr("Replay is inactive. Start or step Replay first."));
+        return;
+    }
+    theoryAsOf_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            replay_.currentTimestamp(),
+            QTimeZone::UTC));
+}
+
+void StrategyLabWidget::runTheoryValidation() {
+    theoryTable_->setRowCount(0);
+    theoryDetail_->setText(
+        tr("Select a result to inspect its point-in-time evidence."));
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        theorySummary_->setText(
+            tr("Theory validation requires a completed loaded series."));
+        return;
+    }
+
+    auto theories = savedStrategies_;
+    auto current = currentStrategy();
+    const auto currentFound = std::ranges::find(
+        theories,
+        current.id,
+        &StrategyDefinition::id);
+    auto editorSkipped = false;
+    if (currentFound == theories.end()) {
+        if (theories.size() < 64) {
+            theories.push_back(std::move(current));
+        } else {
+            editorSkipped = true;
+        }
+    } else if (*currentFound != current) {
+        if (theories.size() < 64) {
+            auto suffix = 1;
+            do {
+                current.id =
+                    QStringLiteral("current-editor-%1")
+                        .arg(suffix++);
+            } while (
+                std::ranges::find(
+                    theories,
+                    current.id,
+                    &StrategyDefinition::id) != theories.end());
+            current.name =
+                tr("%1 (current editor)")
+                    .arg(current.name.left(102));
+            theories.push_back(std::move(current));
+        } else {
+            editorSkipped = true;
+        }
+    }
+
+    TimeframeSeries additionalSeries;
+    QStringList missingSeries;
+    for (const auto& theory : theories) {
+        QStringList missing;
+        const auto loaded =
+            loadAdditionalSeries(
+                theory,
+                symbol_,
+                missing);
+        additionalSeries.insert(
+            loaded.begin(),
+            loaded.end());
+        missingSeries.append(missing);
+    }
+    missingSeries.removeDuplicates();
+
+    theoryReport_ = validateTheories({
+        .symbol = symbol_,
+        .bars = completed,
+        .primaryTimeframe = timeframe_,
+        .additionalSeries = std::move(additionalSeries),
+        .theories = std::move(theories),
+        .analysisThroughTimestamp =
+            theoryAsOf_->dateTime().toUTC().toSecsSinceEpoch(),
+        .shortHorizonBars = 5,
+        .longHorizonBars = 20,
+        .holdoutPercent =
+            static_cast<double>(theoryHoldoutPercent_->value()),
+        .minimumSamples =
+            static_cast<std::size_t>(
+                theoryMinimumSamples_->value()),
+        .roundTripCostBasisPoints =
+            theoryRoundTripCost_->value(),
+    });
+    if (!theoryReport_.ok()) {
+        theorySummary_->setText(
+            tr("Theory validation failed: %1")
+                .arg(theoryReport_.error));
+        return;
+    }
+
+    std::vector<const TheoryValidationResult*> displayResults;
+    displayResults.reserve(theoryReport_.results.size());
+    for (const auto& result : theoryReport_.results) {
+        displayResults.push_back(&result);
+    }
+    const auto reliabilityOrder =
+        [](const TheoryReliability reliability) {
+            switch (reliability) {
+            case TheoryReliability::High:
+                return 3;
+            case TheoryReliability::Moderate:
+                return 2;
+            case TheoryReliability::Low:
+                return 1;
+            case TheoryReliability::Insufficient:
+                return 0;
+            }
+            return 0;
+        };
+    std::ranges::stable_sort(
+        displayResults,
+        [reliabilityOrder](
+            const TheoryValidationResult* left,
+            const TheoryValidationResult* right) {
+            if (left->rank > 0 || right->rank > 0) {
+                if (left->rank == 0) {
+                    return false;
+                }
+                if (right->rank == 0) {
+                    return true;
+                }
+                return left->rank < right->rank;
+            }
+            const auto leftReliability =
+                reliabilityOrder(left->reliability);
+            const auto rightReliability =
+                reliabilityOrder(right->reliability);
+            if (leftReliability != rightReliability) {
+                return leftReliability > rightReliability;
+            }
+            if (left->longHorizon.samples !=
+                right->longHorizon.samples) {
+                return left->longHorizon.samples >
+                       right->longHorizon.samples;
+            }
+            return left->theoryName.compare(
+                       right->theoryName,
+                       Qt::CaseInsensitive) < 0;
+        });
+    theoryTable_->setRowCount(
+        static_cast<int>(displayResults.size()));
+    for (std::size_t index = 0;
+         index < displayResults.size();
+         ++index) {
+        const auto& result = *displayResults[index];
+        const auto percent =
+            [](const double value, const int decimals = 2) {
+                return number(value, decimals) +
+                       QStringLiteral("%");
+            };
+        QStringList values;
+        if (!result.ok()) {
+            values = {
+                QStringLiteral("—"),
+                result.theoryName,
+                QStringLiteral("Unavailable"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                QStringLiteral("—"),
+                theoryReliabilityLabel(result.reliability),
+                theoryEvidenceLabel(result.evidence),
+            };
+        } else {
+            const auto& shortMetrics = result.shortHorizon;
+            const auto& longMetrics = result.longHorizon;
+            values = {
+                result.rank > 0
+                    ? QString::number(result.rank)
+                    : QStringLiteral("—"),
+                result.theoryName,
+                result.evaluationAvailable
+                    ? result.matchesAtAsOf
+                          ? QStringLiteral("MATCH")
+                          : QStringLiteral("No match")
+                    : QStringLiteral("Unavailable"),
+                QString::number(longMetrics.samples),
+                percent(shortMetrics.hitRatePercent, 1),
+                percent(longMetrics.hitRatePercent, 1),
+                percent(longMetrics.averageReturnPercent),
+                percent(
+                    longMetrics.baselineAverageReturnPercent),
+                percent(longMetrics.averageExcessReturnPercent),
+                QString::number(longMetrics.holdoutSamples),
+                percent(longMetrics.holdoutHitRatePercent, 1),
+                percent(
+                    longMetrics.holdoutAverageReturnPercent),
+                QStringLiteral("%1–%2")
+                    .arg(
+                        percent(
+                            longMetrics
+                                .holdoutConfidenceLowerPercent,
+                            1),
+                        percent(
+                            longMetrics
+                                .holdoutConfidenceUpperPercent,
+                            1)),
+                theoryReliabilityLabel(result.reliability),
+                theoryEvidenceLabel(result.evidence),
+            };
+        }
+        for (auto column = 0; column < values.size(); ++column) {
+            auto* item = new QTableWidgetItem(values[column]);
+            if (column == 0) {
+                item->setData(
+                    Qt::UserRole,
+                    result.theoryId);
+            }
+            if (column == 14) {
+                if (result.evidence == TheoryEvidence::Positive) {
+                    item->setForeground(
+                        QColor(QStringLiteral("#26a69a")));
+                } else if (
+                    result.evidence == TheoryEvidence::Negative) {
+                    item->setForeground(
+                        QColor(QStringLiteral("#ef5350")));
+                } else if (
+                    result.evidence == TheoryEvidence::Mixed) {
+                    item->setForeground(
+                        QColor(QStringLiteral("#ff9800")));
+                }
+            }
+            theoryTable_->setItem(
+                static_cast<int>(index),
+                column,
+                item);
+        }
+    }
+
+    QStringList summary{
+        tr("%1 · as of %2 UTC · %3 completed bars.")
+            .arg(theoryReport_.summary)
+            .arg(utcDateTime(theoryReport_.asOfTimestamp))
+            .arg(
+                static_cast<qulonglong>(
+                    theoryReport_.barsAnalyzed)),
+    };
+    for (const auto& warning : theoryReport_.warnings) {
+        summary.push_back(warning);
+    }
+    if (!missingSeries.isEmpty()) {
+        summary.push_back(
+            tr("Missing higher-timeframe history: %1")
+                .arg(
+                    missingSeries.join(
+                        QStringLiteral("; "))));
+    }
+    if (editorSkipped) {
+        summary.push_back(
+            tr("The modified current editor was skipped because the "
+               "64-theory limit was reached."));
+    }
+    theorySummary_->setText(
+        summary.join(QStringLiteral(" ")));
+    if (theoryTable_->rowCount() > 0) {
+        theoryTable_->selectRow(0);
+    }
+}
+
+void StrategyLabWidget::refreshTheoryDetail() {
+    const auto row = theoryTable_->currentRow();
+    if (row < 0 || !theoryTable_->item(row, 0)) {
+        return;
+    }
+    const auto identity =
+        theoryTable_->item(row, 0)
+            ->data(Qt::UserRole)
+            .toString();
+    const auto found = std::ranges::find(
+        theoryReport_.results,
+        identity,
+        &TheoryValidationResult::theoryId);
+    if (found == theoryReport_.results.end()) {
+        return;
+    }
+    if (!found->ok()) {
+        theoryDetail_->setText(
+            tr("%1 is unavailable: %2")
+                .arg(found->theoryName, found->error));
+        return;
+    }
+    const auto& shortMetrics = found->shortHorizon;
+    const auto& longMetrics = found->longHorizon;
+    const auto currentState =
+        found->matchesAtAsOf
+            ? tr("entry rule MATCHES")
+            : found->evaluationAvailable
+                  ? tr("entry rule does not match")
+                  : tr("entry rule unavailable");
+    const QStringList parts{
+        tr("%1 · %2")
+            .arg(found->theoryName, currentState),
+        tr("5 bars: %1 samples, %2% hit, %3% average.")
+            .arg(shortMetrics.samples)
+            .arg(number(shortMetrics.hitRatePercent, 1))
+            .arg(number(shortMetrics.averageReturnPercent, 2)),
+        tr("20 bars: %1 samples, %2% hit, %3% average, %4% median.")
+            .arg(longMetrics.samples)
+            .arg(number(longMetrics.hitRatePercent, 1))
+            .arg(number(longMetrics.averageReturnPercent, 2))
+            .arg(number(longMetrics.medianReturnPercent, 2)),
+        tr("Training: %1 samples, %2% hit, %3% average.")
+            .arg(longMetrics.trainingSamples)
+            .arg(number(longMetrics.trainingHitRatePercent, 1))
+            .arg(number(
+                longMetrics.trainingAverageReturnPercent,
+                2)),
+        tr("Holdout: %1 samples, %2% hit, %3% average, "
+           "95% CI %4–%5%.")
+            .arg(longMetrics.holdoutSamples)
+            .arg(number(longMetrics.holdoutHitRatePercent, 1))
+            .arg(number(
+                longMetrics.holdoutAverageReturnPercent,
+                2))
+            .arg(number(
+                longMetrics.holdoutConfidenceLowerPercent,
+                1))
+            .arg(number(
+                longMetrics.holdoutConfidenceUpperPercent,
+                1)),
+        tr("Unconditional baseline %1%; excess %2%.")
+            .arg(number(
+                longMetrics.baselineAverageReturnPercent,
+                2))
+            .arg(number(
+                longMetrics.averageExcessReturnPercent,
+                2)),
+        tr("Reliability %1; evidence %2.")
+            .arg(
+                theoryReliabilityLabel(found->reliability),
+                theoryEvidenceLabel(found->evidence)),
+        found->explanation,
+    };
+    theoryDetail_->setText(
+        parts.join(QStringLiteral("  ")));
 }
 
 void StrategyLabWidget::runCurrentBacktest() {
@@ -1876,6 +2954,7 @@ void StrategyLabWidget::resetReplay() {
         replayStatus_->setText(tr("No valid series is loaded."));
         return;
     }
+    stopSimulation(false, false);
     replayTimer_->stop();
     replayPlay_->setText(tr("Play"));
     const auto error = replay_.reset(
@@ -1928,6 +3007,475 @@ void StrategyLabWidget::refreshReplayLabel() {
             .arg(replay_.totalCount())
             .arg(number(replay_.progressPercent(), 1))
             .arg(utcDateTime(replay_.currentTimestamp())));
+}
+
+void StrategyLabWidget::updateSimulationMomentRange() {
+    if (!simulationStart_) {
+        return;
+    }
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        simulationStart_->setEnabled(false);
+        return;
+    }
+    const auto minimum =
+        QDateTime::fromSecsSinceEpoch(
+            completed.front().timestamp,
+            QTimeZone::UTC);
+    const auto maximum =
+        QDateTime::fromSecsSinceEpoch(
+            completed.back().timestamp,
+            QTimeZone::UTC);
+    const auto selected = simulationStart_->dateTime();
+    const auto outsideRange =
+        selected < minimum || selected > maximum;
+    const QSignalBlocker blocker(simulationStart_);
+    simulationStart_->setEnabled(true);
+    simulationStart_->setDateTimeRange(minimum, maximum);
+    if (outsideRange) {
+        const auto defaultIndex =
+            completed.size() <= 2
+                ? std::size_t{}
+                : std::min<std::size_t>(
+                      100,
+                      completed.size() - 2);
+        simulationStart_->setDateTime(
+            QDateTime::fromSecsSinceEpoch(
+                completed[defaultIndex].timestamp,
+                QTimeZone::UTC));
+    }
+}
+
+void StrategyLabWidget::useLatestSimulationMoment() {
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        simulationSummary_->setText(
+            tr("No completed series is loaded."));
+        return;
+    }
+    simulationStart_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            completed.back().timestamp,
+            QTimeZone::UTC));
+    emit statusMessage(
+        tr("Latest completed candle selected. No future candle is available "
+           "to reveal unless the loaded history later grows."));
+}
+
+void StrategyLabWidget::useReplaySimulationMoment() {
+    if (!replayActive_ || replay_.visibleCount() == 0) {
+        simulationSummary_->setText(
+            tr("Replay is inactive. Start or step Replay first."));
+        return;
+    }
+    simulationStart_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            replay_.currentTimestamp(),
+            QTimeZone::UTC));
+}
+
+void StrategyLabWidget::startSimulation() {
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        simulationSummary_->setText(
+            tr("Simulation requires a completed loaded series."));
+        return;
+    }
+    const auto strategy = currentStrategy();
+    QStringList missing;
+    auto additionalSeries =
+        loadAdditionalSeries(strategy, symbol_, missing);
+    if (!missing.isEmpty()) {
+        simulationSummary_->setText(
+            tr("Simulation unavailable: %1")
+                .arg(missing.join(QStringLiteral(" "))));
+        return;
+    }
+    const auto selectedTimestamp =
+        simulationStart_->dateTime().toUTC().toSecsSinceEpoch();
+    const auto upper = std::ranges::upper_bound(
+        completed,
+        selectedTimestamp,
+        {},
+        &Bar::timestamp);
+    const auto startIndex =
+        upper == completed.begin()
+            ? std::size_t{}
+            : static_cast<std::size_t>(
+                  std::distance(completed.begin(), upper) - 1);
+    const SimulationConfig config{
+        .strategy = strategy,
+        .execution = {
+            .initialCapital = initialCapital_->value(),
+            .allocationPercent = allocationPercent_->value(),
+            .commissionPerSide = commission_->value(),
+            .slippageBasisPoints = slippage_->value(),
+            .allowFractionalShares =
+                fractionalShares_->isChecked(),
+        },
+        .mode = static_cast<SimulationMode>(
+            simulationMode_->currentData().toInt()),
+        .startIndex = startIndex,
+    };
+    stopReplay(false);
+    simulationTimer_->stop();
+    simulationPlay_->setText(tr("Play"));
+    const auto error = simulation_.reset(
+        completed,
+        timeframe_,
+        std::move(additionalSeries),
+        config);
+    if (!error.isEmpty()) {
+        simulationSummary_->setText(
+            tr("Simulation could not start: %1").arg(error));
+        return;
+    }
+    emit replayBarsRequested(simulation_.visibleBars());
+    refreshSimulation();
+    refreshSimulationSnapshot();
+    emit statusMessage(
+        tr("Simulation started at %1 UTC in %2 mode.")
+            .arg(
+                utcDateTime(
+                    simulation_.account().currentTimestamp),
+                simulationModeLabel(config.mode)));
+}
+
+void StrategyLabWidget::resumeSimulation() {
+    const auto decoded =
+        deserializeSimulationSnapshot(savedSimulationSnapshot_);
+    if (!decoded.ok()) {
+        simulationSummary_->setText(
+            savedSimulationSnapshot_.isEmpty()
+                ? tr("No saved local simulation is available.")
+                : tr("Saved simulation is invalid: %1")
+                      .arg(decoded.error));
+        return;
+    }
+    const auto completed =
+        analysisBars(bars_, timeframe_, metadata_);
+    QStringList missing;
+    auto additionalSeries = loadAdditionalSeries(
+        decoded.snapshot.config.strategy,
+        symbol_,
+        missing);
+    if (!missing.isEmpty()) {
+        simulationSummary_->setText(
+            tr("Saved simulation cannot resume: %1")
+                .arg(missing.join(QStringLiteral(" "))));
+        return;
+    }
+    stopReplay(false);
+    simulationTimer_->stop();
+    simulationPlay_->setText(tr("Play"));
+    const auto error = simulation_.restore(
+        completed,
+        timeframe_,
+        std::move(additionalSeries),
+        decoded.snapshot,
+        symbol_,
+        provider_);
+    if (!error.isEmpty()) {
+        simulationSummary_->setText(
+            tr("Saved simulation cannot resume: %1")
+                .arg(error));
+        return;
+    }
+    applyStrategy(decoded.snapshot.config.strategy);
+    initialCapital_->setValue(
+        decoded.snapshot.config.execution.initialCapital);
+    allocationPercent_->setValue(
+        decoded.snapshot.config.execution.allocationPercent);
+    commission_->setValue(
+        decoded.snapshot.config.execution.commissionPerSide);
+    slippage_->setValue(
+        decoded.snapshot.config.execution.slippageBasisPoints);
+    fractionalShares_->setChecked(
+        decoded.snapshot.config.execution.allowFractionalShares);
+    const auto modeIndex = simulationMode_->findData(
+        static_cast<int>(decoded.snapshot.config.mode));
+    if (modeIndex >= 0) {
+        simulationMode_->setCurrentIndex(modeIndex);
+    }
+    simulationStart_->setDateTime(
+        QDateTime::fromSecsSinceEpoch(
+            completed[decoded.snapshot.config.startIndex].timestamp,
+            QTimeZone::UTC));
+    emit replayBarsRequested(simulation_.visibleBars());
+    refreshSimulation();
+    refreshSimulationSnapshot();
+    emit statusMessage(tr("Saved local simulation resumed."));
+}
+
+void StrategyLabWidget::stepSimulation(const std::size_t count) {
+    if (!simulation_.active()) {
+        startSimulation();
+        if (!simulation_.active()) {
+            return;
+        }
+    }
+    QString error;
+    for (auto index = std::size_t{};
+         index < count && !simulation_.account().finished;
+         ++index) {
+        error = simulation_.step();
+        if (!error.isEmpty()) {
+            break;
+        }
+    }
+    if (!error.isEmpty()) {
+        simulationTimer_->stop();
+        simulationPlay_->setText(tr("Play"));
+        emit statusMessage(error);
+    }
+    if (simulation_.account().finished) {
+        simulationTimer_->stop();
+        simulationPlay_->setText(tr("Play"));
+    }
+    emit replayBarsRequested(simulation_.visibleBars());
+    refreshSimulation();
+    refreshSimulationSnapshot();
+}
+
+void StrategyLabWidget::stopSimulation(
+    const bool restoreChart,
+    const bool clearSession) {
+    simulationTimer_->stop();
+    simulationPlay_->setText(tr("Play"));
+    const auto wasActive = simulation_.active();
+    if (wasActive) {
+        savedSimulationSnapshot_ =
+            serializeSimulationSnapshot(
+                simulation_.snapshot(symbol_, provider_));
+    }
+    if (clearSession) {
+        simulation_.clear();
+    }
+    if (restoreChart && wasActive) {
+        emit restoreFullSeriesRequested();
+    }
+    refreshSimulation();
+}
+
+void StrategyLabWidget::refreshSimulation() {
+    simulationTrades_->setRowCount(0);
+    simulationDecisions_->setRowCount(0);
+    const auto active = simulation_.active();
+    if (!active) {
+        simulationSummary_->setText(
+            savedSimulationSnapshot_.isEmpty()
+                ? tr("Simulation is inactive. Execution assumptions come "
+                     "from Backtest.")
+                : tr("Simulation is inactive. A guarded local snapshot is "
+                     "available through Resume saved."));
+        simulationRule_->setText(
+            tr("No completed-candle rule has been evaluated."));
+        for (auto* button : {
+                 simulationBuy_,
+                 simulationSell_,
+                 simulationApprove_,
+                 simulationReject_,
+             }) {
+            button->setEnabled(false);
+        }
+        return;
+    }
+    const auto& account = simulation_.account();
+    const auto& config = simulation_.config();
+    const auto openPosition =
+        account.quantity > 0.0
+            ? tr("%1 shares @ %2")
+                  .arg(number(account.quantity, 6))
+                  .arg(number(account.entryPrice, 4))
+            : tr("flat");
+    const auto pending =
+        account.pendingAction != SimulationAction::None
+            ? tr("pending %1 next open")
+                  .arg(
+                      simulationActionLabel(
+                          account.pendingAction))
+            : (account.proposedAction != SimulationAction::None
+                   ? tr("proposed %1")
+                         .arg(
+                             simulationActionLabel(
+                                 account.proposedAction))
+                   : tr("no order"));
+    simulationSummary_->setText(
+        tr("%1 mode · %2 UTC · Cash %3 · Position %4 · Equity %5 · "
+           "Realized %6 · Unrealized %7 · Return %8% · Current/maximum "
+           "drawdown %9%/%10% · %11%12")
+            .arg(
+                simulationModeLabel(config.mode),
+                utcDateTime(account.currentTimestamp),
+                number(account.cash, 2),
+                openPosition,
+                number(account.equity, 2),
+                number(account.realizedProfitLoss, 2),
+                number(account.unrealizedProfitLoss, 2),
+                number(account.totalReturnPercent, 2),
+                number(account.currentDrawdownPercent, 2),
+                number(account.maximumDrawdownPercent, 2),
+                pending,
+                account.finished
+                    ? tr(" · final candle reached")
+                    : QString{}));
+    simulationRule_->setText(account.ruleDetail);
+
+    const auto manual =
+        config.mode == SimulationMode::Manual &&
+        !account.finished &&
+        account.pendingAction == SimulationAction::None &&
+        account.proposedAction == SimulationAction::None;
+    simulationBuy_->setEnabled(
+        manual && account.quantity <= 0.0);
+    simulationSell_->setEnabled(
+        manual && account.quantity > 0.0);
+    simulationApprove_->setEnabled(
+        config.mode == SimulationMode::Assisted &&
+        account.proposedAction != SimulationAction::None);
+    simulationReject_->setEnabled(
+        simulationApprove_->isEnabled());
+
+    const auto& trades = simulation_.trades();
+    simulationTrades_->setRowCount(
+        static_cast<int>(trades.size()));
+    for (auto index = std::size_t{};
+         index < trades.size();
+         ++index) {
+        const auto& trade = trades[index];
+        const QStringList values{
+            utcDateTime(trade.entryTimestamp),
+            utcDateTime(trade.exitTimestamp),
+            number(trade.quantity, 6),
+            number(trade.entryPrice, 4),
+            number(trade.exitPrice, 4),
+            number(trade.profitLoss, 2),
+            number(trade.returnPercent, 2) +
+                QStringLiteral("%"),
+            QString::number(trade.barsHeld),
+        };
+        for (auto column = 0;
+             column < values.size();
+             ++column) {
+            simulationTrades_->setItem(
+                static_cast<int>(index),
+                column,
+                new QTableWidgetItem(values[column]));
+        }
+    }
+
+    const auto& decisions = simulation_.decisions();
+    constexpr auto maximumVisibleDecisions =
+        std::size_t{500};
+    const auto firstDecision =
+        decisions.size() > maximumVisibleDecisions
+            ? decisions.size() - maximumVisibleDecisions
+            : std::size_t{};
+    simulationDecisions_->setRowCount(
+        static_cast<int>(
+            decisions.size() - firstDecision));
+    for (auto index = firstDecision;
+         index < decisions.size();
+         ++index) {
+        const auto& decision = decisions[index];
+        const auto row =
+            static_cast<int>(index - firstDecision);
+        const QStringList values{
+            utcDateTime(decision.timestamp),
+            simulationActionLabel(decision.action),
+            simulationDecisionOriginLabel(decision.origin),
+            simulationDecisionDispositionLabel(
+                decision.disposition),
+            decision.detail,
+        };
+        for (auto column = 0;
+             column < values.size();
+             ++column) {
+            simulationDecisions_->setItem(
+                row,
+                column,
+                new QTableWidgetItem(values[column]));
+        }
+    }
+}
+
+void StrategyLabWidget::refreshSimulationSnapshot() {
+    if (simulation_.active()) {
+        savedSimulationSnapshot_ =
+            serializeSimulationSnapshot(
+                simulation_.snapshot(symbol_, provider_));
+    }
+    emit workspaceChanged();
+}
+
+void StrategyLabWidget::compileScript() {
+    scriptImport_ =
+        importPineStrategy(scriptSource_->toPlainText());
+    refreshScriptDiagnostics();
+    scriptApply_->setEnabled(scriptImport_.ok());
+    scriptSummary_->setText(
+        pineNativeStrategyPreview(scriptImport_));
+    emit workspaceChanged();
+}
+
+void StrategyLabWidget::applyImportedScript() {
+    if (!scriptImport_.ok()) {
+        emit statusMessage(
+            tr("Compile a valid supported script before applying."));
+        return;
+    }
+    applyStrategy(scriptImport_.strategy);
+    initialCapital_->setValue(
+        scriptImport_.execution.initialCapital);
+    allocationPercent_->setValue(
+        scriptImport_.execution.allocationPercent);
+    commission_->setValue(
+        scriptImport_.execution.commissionPerSide);
+    emit statusMessage(
+        tr("Applied “%1” as native rules. Review the visual editor and "
+           "execution assumptions before saving or simulating.")
+            .arg(scriptImport_.strategy.name));
+    emit workspaceChanged();
+}
+
+void StrategyLabWidget::refreshScriptDiagnostics() {
+    scriptDiagnostics_->setRowCount(
+        static_cast<int>(
+            scriptImport_.diagnostics.size()));
+    for (auto index = std::size_t{};
+         index < scriptImport_.diagnostics.size();
+         ++index) {
+        const auto& diagnostic =
+            scriptImport_.diagnostics[index];
+        const QStringList values{
+            pineDiagnosticSeverityLabel(
+                diagnostic.severity),
+            QString::number(diagnostic.line),
+            QString::number(diagnostic.column),
+            diagnostic.message,
+        };
+        for (auto column = 0;
+             column < values.size();
+             ++column) {
+            auto* item =
+                new QTableWidgetItem(values[column]);
+            if (diagnostic.severity ==
+                PineDiagnosticSeverity::Error) {
+                item->setForeground(QColor(QStringLiteral("#f7525f")));
+            } else if (
+                diagnostic.severity ==
+                PineDiagnosticSeverity::Warning) {
+                item->setForeground(QColor(QStringLiteral("#f0b90b")));
+            }
+            scriptDiagnostics_->setItem(
+                static_cast<int>(index),
+                column,
+                item);
+        }
+    }
 }
 
 void StrategyLabWidget::scanWatchlist() {

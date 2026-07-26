@@ -99,7 +99,7 @@ void EventIntelligenceClient::fetchSecFilings(
                 QStringLiteral(
                     "SEC_USER_AGENT is required and must identify the app "
                     "with a contact email, for example "
-                    "\"TradingViewChart your@email.example\"."),
+                    "\"TradeChartLab your@email.example\"."),
         });
         return;
     }
@@ -156,7 +156,7 @@ void EventIntelligenceClient::fetchFredCalendar(Callback callback) {
     const auto requestGeneration = generation_;
     auto* reply = network_->get(providerRequest(
         url,
-        QStringLiteral("TradingViewChart/1.0.0 (Qt; personal client)")));
+        QStringLiteral("TradeChartLab/1.1.0 (Qt; personal client)")));
     activeReply_ = reply;
     consumeBoundedNetworkReply(
         reply,

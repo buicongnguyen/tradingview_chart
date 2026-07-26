@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradingViewChart VERSION 1.0.0 LANGUAGES CXX)
+project(TradeChartLab VERSION 1.1.0 LANGUAGES CXX)
 
 option(
     TRADINGVIEW_CHART_BUILD_TESTS
@@ -72,10 +72,16 @@ add_library(tradingview_chart_core
     src/research/research_models.hpp
     src/strategy/replay_session.cpp
     src/strategy/replay_session.hpp
+    src/strategy/pine_strategy_importer.cpp
+    src/strategy/pine_strategy_importer.hpp
     src/strategy/strategy_engine.cpp
     src/strategy/strategy_engine.hpp
     src/strategy/strategy_models.cpp
     src/strategy/strategy_models.hpp
+    src/strategy/theory_validation.cpp
+    src/strategy/theory_validation.hpp
+    src/strategy/trading_simulation.cpp
+    src/strategy/trading_simulation.hpp
     src/util/csv_security.cpp
     src/util/csv_security.hpp
     src/watchlists/watchlist_workspace.cpp
@@ -186,7 +192,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${android_package_dir}"
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 36
-        QT_ANDROID_VERSION_CODE 1000
+        QT_ANDROID_VERSION_CODE 1100
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
     )
 
@@ -414,7 +420,7 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         CONFIGURATIONS "Release;RelWithDebInfo;MinSizeRel"
         TIMEOUT 30
         ENVIRONMENT
-            "QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu --no-sandbox"
+            "QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu --disable-gpu-compositing --no-sandbox;QT_OPENGL=software;QT_QUICK_BACKEND=software"
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"
         LABELS "integration"

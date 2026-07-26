@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <limits>
+#include <set>
 
 namespace tvchart {
 
@@ -87,6 +88,16 @@ void ChartBridge::setResearchEvents(std::vector<ResearchEvent> events) {
 
 void ChartBridge::setMarketStructure(MarketStructureReport report) {
     marketStructure_ = std::move(report);
+    if (ready_) {
+        emit marketStructureChanged(marketStructureToJson());
+    }
+}
+
+void ChartBridge::setMarketStructureVisible(const bool visible) {
+    if (marketStructureVisible_ == visible) {
+        return;
+    }
+    marketStructureVisible_ = visible;
     if (ready_) {
         emit marketStructureChanged(marketStructureToJson());
     }
@@ -330,7 +341,8 @@ QJsonObject ChartBridge::marketStructureToJson() const {
     QJsonArray lines;
     constexpr auto maximumStructures = std::size_t{16};
     constexpr auto maximumZones = std::size_t{8};
-    if (!marketStructure_.ok() || bars_.empty() ||
+    if (!marketStructureVisible_ ||
+        !marketStructure_.ok() || bars_.empty() ||
         marketStructure_.symbol.compare(
             symbol_.trimmed(),
             Qt::CaseInsensitive) != 0) {
@@ -433,14 +445,24 @@ QJsonObject ChartBridge::marketStructureToJson() const {
         }
         appendLine(line);
     }
+    constexpr auto maximumPatternOverlays = std::size_t{3};
+    auto patternsRendered = std::size_t{};
+    std::set<std::pair<PatternKind, PatternDirection>>
+        renderedPatternKinds;
     for (auto pattern = marketStructure_.patterns.rbegin();
          pattern != marketStructure_.patterns.rend() &&
+         patternsRendered < maximumPatternOverlays &&
          zones.size() + lines.size() <
              static_cast<qsizetype>(maximumStructures);
          ++pattern) {
-        if (pattern->status == PatternStatus::Invalidated) {
+        if ((pattern->status != PatternStatus::Emerging &&
+             pattern->status != PatternStatus::Confirmed) ||
+            !renderedPatternKinds
+                 .insert({pattern->kind, pattern->direction})
+                 .second) {
             continue;
         }
+        const auto lineCountBefore = lines.size();
         for (const auto& boundary : pattern->boundaries) {
             appendLine(
                 boundary,
@@ -452,6 +474,9 @@ QJsonObject ChartBridge::marketStructureToJson() const {
                 static_cast<qsizetype>(maximumStructures)) {
                 break;
             }
+        }
+        if (lines.size() > lineCountBefore) {
+            ++patternsRendered;
         }
     }
     return {

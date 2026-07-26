@@ -1,8 +1,8 @@
 {
-  "name": "tradingview-chart-assets",
+  "name": "tradechart-lab-assets",
   "private": true,
-  "version": "1.0.0",
-  "description": "Pinned web assets for the TradingView Chart Qt application",
+  "version": "1.1.0",
+  "description": "Pinned web assets for the TradeChart Lab Qt application",
   "engines": {
     "node": ">=22.3"
   },

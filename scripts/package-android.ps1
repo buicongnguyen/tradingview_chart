@@ -131,7 +131,7 @@ if ($null -eq $unsignedApk) {
 
 $distRoot = Join-Path $repositoryRoot 'dist'
 New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-$packageBase = "TradingViewChart-1.0.0-android-$androidAbi"
+$packageBase = "TradeChartLab-1.1.0-android-$androidAbi"
 $artifactSuffix = if ($Configuration -eq 'Debug') {
     '-debug'
 } elseif ($SkipSigning) {
@@ -188,7 +188,7 @@ if ($Configuration -eq 'Release' -and -not $SkipSigning) {
                 -keyalg RSA `
                 -keysize 4096 `
                 -validity 10000 `
-                -dname 'CN=TradingView Chart, OU=Personal, O=buicongnguyen, C=US'
+                -dname 'CN=TradeChart Lab, OU=Personal, O=buicongnguyen, C=US'
             if ($LASTEXITCODE -ne 0) {
                 throw "Android signing key generation failed with exit code $LASTEXITCODE."
             }

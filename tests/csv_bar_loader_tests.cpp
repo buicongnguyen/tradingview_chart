@@ -39,6 +39,7 @@ private slots:
     void reportsProviderErrors();
     void reportsUnexpectedJsonShape();
     void chartBridgeRepublishesStateAfterWebReload();
+    void chartBridgeBoundsAndTogglesStructureOverlays();
 };
 
 void CsvBarLoaderTests::parsesUnixAndIsoTimestamps() {
@@ -635,6 +636,84 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
     QCOMPARE(structureSpy.count(), 1);
     QCOMPARE(levelSpy.count(), 1);
     QCOMPARE(readySpy.count(), 1);
+}
+
+void CsvBarLoaderTests::chartBridgeBoundsAndTogglesStructureOverlays() {
+    tvchart::ChartBridge bridge;
+    const tvchart::Bars bars{
+        {
+            .timestamp = 1'700'000'000,
+            .open = 100.0,
+            .high = 102.0,
+            .low = 99.0,
+            .close = 101.0,
+            .volume = 1'000.0,
+        },
+        {
+            .timestamp = 1'700'000'300,
+            .open = 101.0,
+            .high = 103.0,
+            .low = 100.0,
+            .close = 102.0,
+            .volume = 1'100.0,
+        },
+    };
+    QVERIFY(bridge.setSeries(
+        QStringLiteral("AAPL"),
+        QStringLiteral("5m"),
+        QStringLiteral("Yahoo Finance"),
+        bars));
+
+    tvchart::MarketStructureReport report;
+    report.symbol = QStringLiteral("AAPL");
+    report.timeframe = tvchart::Timeframe::FiveMinutes;
+    report.barsAnalyzed = bars.size();
+    report.asOfTimestamp = bars.back().timestamp;
+    report.latestClose = bars.back().close;
+    for (auto index = 0; index < 2; ++index) {
+        tvchart::ChartPattern pattern;
+        pattern.id = QStringLiteral("rectangle-%1").arg(index);
+        pattern.kind = tvchart::PatternKind::Rectangle;
+        pattern.direction = tvchart::PatternDirection::Neutral;
+        pattern.status = tvchart::PatternStatus::Confirmed;
+        pattern.boundaries.push_back({
+            .kind = tvchart::StructureLineKind::PatternBoundary,
+            .startTimestamp = bars.front().timestamp,
+            .endTimestamp = bars.back().timestamp,
+            .startPrice = 100.0 + index,
+            .endPrice = 100.0 + index,
+            .title = QStringLiteral("Rectangle"),
+            .color = QStringLiteral("#ff9800"),
+            .dashed = true,
+        });
+        report.patterns.push_back(std::move(pattern));
+    }
+    bridge.setMarketStructure(std::move(report));
+    bridge.setMarketStructureVisible(false);
+
+    QSignalSpy structureSpy(
+        &bridge,
+        &tvchart::ChartBridge::marketStructureChanged);
+    bridge.webReady();
+    QCOMPARE(structureSpy.count(), 1);
+    auto structure =
+        structureSpy.takeFirst().at(0).toJsonObject();
+    QCOMPARE(
+        structure.value(QStringLiteral("zones")).toArray().size(),
+        0);
+    QCOMPARE(
+        structure.value(QStringLiteral("lines")).toArray().size(),
+        0);
+
+    bridge.setMarketStructureVisible(true);
+    QCOMPARE(structureSpy.count(), 1);
+    structure = structureSpy.takeFirst().at(0).toJsonObject();
+    QCOMPARE(
+        structure.value(QStringLiteral("lines")).toArray().size(),
+        1);
+
+    bridge.setMarketStructureVisible(true);
+    QCOMPARE(structureSpy.count(), 0);
 }
 
 QTEST_APPLESS_MAIN(CsvBarLoaderTests)

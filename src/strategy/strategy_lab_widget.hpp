@@ -2,10 +2,14 @@
 
 #include "data/market_data_parser.hpp"
 #include "domain/bar.hpp"
+#include "strategy/pine_strategy_importer.hpp"
 #include "strategy/replay_session.hpp"
 #include "strategy/strategy_engine.hpp"
+#include "strategy/theory_validation.hpp"
+#include "strategy/trading_simulation.hpp"
 #include "research/research_models.hpp"
 
+#include <QByteArray>
 #include <QStringList>
 #include <QWidget>
 
@@ -23,7 +27,9 @@ class QSettings;
 class QSpinBox;
 class QSystemTrayIcon;
 class QTableWidget;
+class QTabWidget;
 class QTimer;
+class QTextEdit;
 
 namespace tvchart {
 
@@ -55,6 +61,9 @@ public:
     void restoreSettings(QSettings& settings);
     void saveSettings(QSettings& settings) const;
     void restoreChartIfReplaying();
+    void showTheoryValidation();
+    void showTradingSimulation();
+    void showScriptLab();
 
 signals:
     void replayBarsRequested(tvchart::Bars bars);
@@ -110,11 +119,28 @@ private:
 
     void runCurrentBacktest();
     void runRobustness();
+    void runTheoryValidation();
+    void useLatestTheoryMoment();
+    void useReplayTheoryMoment();
+    void updateTheoryMomentRange();
+    void refreshTheoryDetail();
     void showBacktest(const BacktestResult& result);
     void resetReplay();
     void stepReplay(std::size_t count = 1);
     void stopReplay(bool restoreChart);
     void refreshReplayLabel();
+    void startSimulation();
+    void resumeSimulation();
+    void stepSimulation(std::size_t count = 1);
+    void stopSimulation(bool restoreChart, bool clearSession);
+    void useLatestSimulationMoment();
+    void useReplaySimulationMoment();
+    void updateSimulationMomentRange();
+    void refreshSimulation();
+    void refreshSimulationSnapshot();
+    void compileScript();
+    void applyImportedScript();
+    void refreshScriptDiagnostics();
     void scanWatchlist();
     void evaluateForegroundAlert();
     void evaluateManagedAlerts(bool automatic);
@@ -149,6 +175,17 @@ private:
     QTableWidget* regimeTable_{};
     QTableWidget* batchTable_{};
 
+    QTabWidget* tabs_{};
+    QWidget* theoryTab_{};
+    QDateTimeEdit* theoryAsOf_{};
+    QSpinBox* theoryMinimumSamples_{};
+    QSpinBox* theoryHoldoutPercent_{};
+    QDoubleSpinBox* theoryRoundTripCost_{};
+    QLabel* theorySummary_{};
+    QTableWidget* theoryTable_{};
+    QLabel* theoryDetail_{};
+    TheoryValidationReport theoryReport_;
+
     QSpinBox* replayWarmup_{};
     QComboBox* replaySpeed_{};
     QPushButton* replayPlay_{};
@@ -156,6 +193,30 @@ private:
     QTimer* replayTimer_{};
     ReplaySession replay_;
     bool replayActive_{};
+
+    QWidget* simulationTab_{};
+    QDateTimeEdit* simulationStart_{};
+    QComboBox* simulationMode_{};
+    QComboBox* simulationSpeed_{};
+    QPushButton* simulationPlay_{};
+    QPushButton* simulationBuy_{};
+    QPushButton* simulationSell_{};
+    QPushButton* simulationApprove_{};
+    QPushButton* simulationReject_{};
+    QLabel* simulationSummary_{};
+    QLabel* simulationRule_{};
+    QTableWidget* simulationTrades_{};
+    QTableWidget* simulationDecisions_{};
+    QTimer* simulationTimer_{};
+    TradingSimulationSession simulation_;
+    QByteArray savedSimulationSnapshot_;
+
+    QWidget* scriptTab_{};
+    QTextEdit* scriptSource_{};
+    QLabel* scriptSummary_{};
+    QTableWidget* scriptDiagnostics_{};
+    QPushButton* scriptApply_{};
+    PineStrategyImportResult scriptImport_;
 
     QTableWidget* scannerTable_{};
     QLabel* scannerStatus_{};
