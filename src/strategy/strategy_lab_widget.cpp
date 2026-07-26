@@ -30,6 +30,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <ranges>
 #include <utility>
@@ -76,6 +77,23 @@ void setComboData(QComboBox& combo, const int value) {
         return QStringLiteral("Unavailable");
     }
     return QStringLiteral("Unavailable");
+}
+
+[[nodiscard]] Bars analysisBars(
+    const Bars& bars,
+    const Timeframe timeframe,
+    const MarketDataMetadata& metadata) {
+    if (metadata.deliveryMode != DataDeliveryMode::Polled) {
+        return bars;
+    }
+    const auto count =
+        completedBarCount(bars, timeframe, metadata.retrievedAtUtc);
+    return {
+        bars.begin(),
+        std::next(
+            bars.begin(),
+            static_cast<std::ptrdiff_t>(count)),
+    };
 }
 
 } // namespace
@@ -484,20 +502,23 @@ void StrategyLabWidget::setCurrentSeries(
     replayWarmup_->setValue(
         std::min(
             static_cast<int>(bars_.size()),
-            std::max(1, std::min(100, replayWarmup_->value()))));
+            std::max(1, replayWarmup_->value())));
 
     if (historyStore_ && historyStore_->isOpen() &&
         metadata_.deliveryMode == DataDeliveryMode::Polled &&
         !bars_.empty()) {
-        const auto error = historyStore_->upsertSeries(
-            provider_,
-            symbol_,
-            timeframe_,
-            bars_,
-            metadata_);
-        if (!error.isEmpty()) {
-            emit statusMessage(
-                tr("History cache did not update: %1").arg(error));
+        const auto completed = analysisBars(bars_, timeframe_, metadata_);
+        if (!completed.empty()) {
+            const auto error = historyStore_->upsertSeries(
+                provider_,
+                symbol_,
+                timeframe_,
+                completed,
+                metadata_);
+            if (!error.isEmpty()) {
+                emit statusMessage(
+                    tr("History cache did not update: %1").arg(error));
+            }
         }
     }
     evaluateForegroundAlert();
@@ -569,12 +590,13 @@ void StrategyLabWidget::restoreChartIfReplaying() {
 }
 
 void StrategyLabWidget::runCurrentBacktest() {
-    if (bars_.empty()) {
+    const auto completed = analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
         metricsLabel_->setText(tr("No valid series is loaded."));
         return;
     }
     const auto result = runBacktest(
-        bars_,
+        completed,
         currentStrategy(),
         {
             .initialCapital = initialCapital_->value(),
@@ -632,15 +654,18 @@ void StrategyLabWidget::showBacktest(const BacktestResult& result) {
 }
 
 void StrategyLabWidget::resetReplay() {
-    if (bars_.empty()) {
+    const auto completed = analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
         replayStatus_->setText(tr("No valid series is loaded."));
         return;
     }
     replayTimer_->stop();
     replayPlay_->setText(tr("Play"));
     const auto error = replay_.reset(
-        bars_,
-        static_cast<std::size_t>(replayWarmup_->value()));
+        completed,
+        std::min(
+            completed.size(),
+            static_cast<std::size_t>(replayWarmup_->value())));
     if (!error.isEmpty()) {
         replayStatus_->setText(error);
         return;
@@ -705,11 +730,15 @@ void StrategyLabWidget::scanWatchlist() {
     for (const auto& symbol : watchlistSymbols_) {
         auto cached = historyStore_->loadLatestSeries(symbol, timeframe_);
         loadErrors.push_back(cached.error);
+        auto completed =
+            cached.ok()
+                ? analysisBars(cached.bars, timeframe_, cached.metadata)
+                : Bars{};
         candidates.push_back({
             .symbol = symbol,
             .provider =
                 cached.ok() ? cached.key.provider : QStringLiteral("Cache"),
-            .bars = std::move(cached.bars),
+            .bars = std::move(completed),
         });
     }
     auto results = scanLatest(candidates, currentStrategy().entry);
@@ -766,7 +795,11 @@ void StrategyLabWidget::evaluateForegroundAlert() {
         .symbol = symbol_,
         .condition = strategy.entry,
     };
-    const auto evaluation = alertEngine_.evaluate(alert, bars_);
+    const auto completed = analysisBars(bars_, timeframe_, metadata_);
+    if (completed.empty()) {
+        return;
+    }
+    const auto evaluation = alertEngine_.evaluate(alert, completed);
     if (!evaluation.error.isEmpty()) {
         emit statusMessage(tr("Foreground alert failed: %1").arg(evaluation.error));
         return;
@@ -777,6 +810,10 @@ void StrategyLabWidget::evaluateForegroundAlert() {
 }
 
 void StrategyLabWidget::appendAlert(const AlertTrigger& trigger) {
+    constexpr auto maximumVisibleAlerts = 1'000;
+    while (alertTable_->rowCount() >= maximumVisibleAlerts) {
+        alertTable_->removeRow(0);
+    }
     const auto row = alertTable_->rowCount();
     alertTable_->insertRow(row);
     alertTable_->setItem(row, 0, new QTableWidgetItem(utcDateTime(trigger.timestamp)));

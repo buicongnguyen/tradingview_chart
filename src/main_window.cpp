@@ -2128,7 +2128,11 @@ void MainWindow::mergeResearchResult(AlphaVantageResearchResult result) {
         [&](const ResearchEvent& event) {
             return normalizeWatchlistSymbol(event.symbol) == symbol &&
                    event.source.compare(provider, Qt::CaseInsensitive) == 0 &&
-                   event.id.startsWith(QStringLiteral("alpha-vantage-"));
+                   event.id.startsWith(QStringLiteral("alpha-vantage-")) &&
+                   (event.type == ResearchEventType::ExDividend ||
+                    event.type == ResearchEventType::DividendPayment ||
+                    (result.earningsCalendarUpdated &&
+                     event.type == ResearchEventType::Earnings));
         });
     const auto eventCapacity =
         ResearchWorkspace::maximumEvents - researchWorkspace_.events.size();
@@ -2635,10 +2639,10 @@ void MainWindow::addResearchEvent() {
     date->setCalendarPopup(true);
     date->setDisplayFormat(QStringLiteral("yyyy-MM-dd"));
     auto* timeOfDay = new QLineEdit(&dialog);
-    timeOfDay->setMaxLength(80);
+    timeOfDay->setMaxLength(40);
     timeOfDay->setPlaceholderText(tr("Optional, e.g. after market"));
     auto* title = new QLineEdit(&dialog);
-    title->setMaxLength(240);
+    title->setMaxLength(160);
     auto* source = new QLineEdit(QStringLiteral("Manual"), &dialog);
     source->setMaxLength(120);
     auto* confidence = new QComboBox(&dialog);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -46,5 +47,9 @@ using Bars = std::vector<Bar>;
 
 [[nodiscard]] std::optional<std::string> validateBar(const Bar& bar);
 [[nodiscard]] std::optional<std::string> validateBars(const Bars& bars);
+[[nodiscard]] std::size_t completedBarCount(
+    const Bars& bars,
+    Timeframe timeframe,
+    std::int64_t asOfUtc) noexcept;
 
 } // namespace tvchart

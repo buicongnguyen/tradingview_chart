@@ -2,6 +2,9 @@
 #include "research/alpha_vantage_research_parser.hpp"
 #include "research/research_models.hpp"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTest>
 
 #include <cmath>
@@ -16,6 +19,7 @@ private slots:
     void keepsAggregatedConsensusSeparate();
     void rejectsInvalidResearchSymbols();
     void roundTripsResearchWorkspace();
+    void rejectsMalformedResearchWorkspaceFields();
     void importsQuotedTargetCsv();
     void boundsTargetsAndNeutralizesFormulaText();
     void parsesAlphaVantageResearch();
@@ -181,6 +185,40 @@ void ResearchModelsTests::roundTripsResearchWorkspace() {
         tvchart::serializeResearchWorkspace(workspace));
     QVERIFY2(loaded.ok(), qPrintable(loaded.error));
     QCOMPARE(loaded.workspace, workspace);
+}
+
+void ResearchModelsTests::rejectsMalformedResearchWorkspaceFields() {
+    const tvchart::ResearchWorkspace workspace{
+        .companySnapshots = {{
+            .symbol = QStringLiteral("AAPL"),
+            .provider = QStringLiteral("Provider"),
+            .asOfUtc = 1'775'000'000,
+            .currency = QStringLiteral("USD"),
+            .analystTargetPrice = 220.0,
+            .ratings = {.buy = 10},
+        }},
+    };
+    auto document = QJsonDocument::fromJson(
+        tvchart::serializeResearchWorkspace(workspace));
+    auto root = document.object();
+    auto snapshots =
+        root.value(QStringLiteral("companySnapshots")).toArray();
+    auto snapshot = snapshots.at(0).toObject();
+    snapshot.insert(
+        QStringLiteral("analystTargetPrice"),
+        QStringLiteral("not-a-number"));
+    snapshots.replace(0, snapshot);
+    root.insert(QStringLiteral("companySnapshots"), snapshots);
+    const auto invalidNumber = tvchart::deserializeResearchWorkspace(
+        QJsonDocument(root).toJson(QJsonDocument::Compact));
+    QVERIFY(!invalidNumber.ok());
+    QVERIFY(invalidNumber.error.contains(QStringLiteral("company research")));
+
+    root.remove(QStringLiteral("events"));
+    const auto missingCollection = tvchart::deserializeResearchWorkspace(
+        QJsonDocument(root).toJson(QJsonDocument::Compact));
+    QVERIFY(!missingCollection.ok());
+    QVERIFY(missingCollection.error.contains(QStringLiteral("collections")));
 }
 
 void ResearchModelsTests::importsQuotedTargetCsv() {

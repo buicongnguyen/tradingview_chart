@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 namespace tvchart {
 
@@ -52,6 +53,25 @@ std::optional<std::string> validateBars(const Bars& bars) {
         previousTimestamp = bars[index].timestamp;
     }
     return std::nullopt;
+}
+
+std::size_t completedBarCount(
+    const Bars& bars,
+    const Timeframe timeframe,
+    const std::int64_t asOfUtc) noexcept {
+    const auto duration = timeframeSeconds(timeframe);
+    if (asOfUtc <= duration) {
+        return 0;
+    }
+    const auto latestCompletedStart = asOfUtc - duration;
+    const auto end = std::upper_bound(
+        bars.begin(),
+        bars.end(),
+        latestCompletedStart,
+        [](const std::int64_t timestamp, const Bar& bar) {
+            return timestamp < bar.timestamp;
+        });
+    return static_cast<std::size_t>(std::distance(bars.begin(), end));
 }
 
 } // namespace tvchart

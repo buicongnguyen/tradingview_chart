@@ -58,9 +58,26 @@ constexpr auto kMaximumUnixTimestamp = std::int64_t{253'402'300'799};
         [](const Bar& left, const Bar& right) {
             return left.timestamp < right.timestamp;
         });
-    const auto duplicate =
-        std::ranges::unique(bars, {}, &Bar::timestamp);
-    bars.erase(duplicate.begin(), duplicate.end());
+
+    Bars normalized;
+    normalized.reserve(bars.size());
+    for (const auto& bar : bars) {
+        if (!normalized.empty() &&
+            normalized.back().timestamp == bar.timestamp) {
+            if (normalized.back() != bar) {
+                return {
+                    .error =
+                        QStringLiteral(
+                            "%1 returned conflicting bars for timestamp %2.")
+                            .arg(provider)
+                            .arg(bar.timestamp),
+                };
+            }
+            continue;
+        }
+        normalized.push_back(bar);
+    }
+    bars = std::move(normalized);
 
     if (bars.empty()) {
         return {.error = QStringLiteral("%1 returned no usable OHLCV bars.").arg(provider)};
@@ -244,13 +261,16 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
         };
     }
 
+    const auto meta = root.value(QStringLiteral("meta")).toObject();
     auto timeZone = QTimeZone::utc();
-    const auto timeZoneId =
-        root.value(QStringLiteral("meta"))
-            .toObject()
-            .value(QStringLiteral("timezone"))
-            .toString()
-            .trimmed();
+    auto timeZoneId =
+        meta.value(QStringLiteral("timezone")).toString().trimmed();
+    if (timeZoneId.isEmpty()) {
+        timeZoneId =
+            meta.value(QStringLiteral("exchange_timezone"))
+                .toString()
+                .trimmed();
+    }
     if (!timeZoneId.isEmpty()) {
         timeZone = QTimeZone(timeZoneId.toUtf8());
         if (!timeZone.isValid()) {
@@ -304,7 +324,6 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
     if (!parsed.ok()) {
         return parsed;
     }
-    const auto meta = root.value(QStringLiteral("meta")).toObject();
     parsed.metadata.exchange =
         meta.value(QStringLiteral("exchange")).toString();
     parsed.metadata.currency =

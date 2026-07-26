@@ -10,6 +10,7 @@ private slots:
     void roundTripsProvenanceAndGapSafeUpserts();
     void rejectsSyntheticAndInvalidSeries();
     void selectsLatestProviderSeries();
+    void prefersTheProviderWithTheNewestBar();
 };
 
 namespace {
@@ -183,6 +184,34 @@ void HistoricalDataStoreTests::selectsLatestProviderSeries() {
     QVERIFY2(latest.ok(), qPrintable(latest.error));
     QCOMPARE(latest.key.provider, QStringLiteral("Twelve Data"));
     QCOMPARE(latest.bars.front().close, 200.0);
+}
+
+void HistoricalDataStoreTests::prefersTheProviderWithTheNewestBar() {
+    tvchart::HistoricalDataStore store(QStringLiteral(":memory:"));
+    QVERIFY2(store.open(), qPrintable(store.lastError()));
+    QVERIFY(store
+                .upsertSeries(
+                    QStringLiteral("Fresh Provider"),
+                    QStringLiteral("NVDA"),
+                    tvchart::Timeframe::FiveMinutes,
+                    {bar(1'700'000'600, 300.0)},
+                    metadata(1'700'001'000))
+                .isEmpty());
+    QVERIFY(store
+                .upsertSeries(
+                    QStringLiteral("Recently Written But Stale"),
+                    QStringLiteral("NVDA"),
+                    tvchart::Timeframe::FiveMinutes,
+                    {bar(1'700'000'000, 200.0)},
+                    metadata(1'700'002'000))
+                .isEmpty());
+
+    const auto latest = store.loadLatestSeries(
+        QStringLiteral("NVDA"),
+        tvchart::Timeframe::FiveMinutes);
+    QVERIFY2(latest.ok(), qPrintable(latest.error));
+    QCOMPARE(latest.key.provider, QStringLiteral("Fresh Provider"));
+    QCOMPARE(latest.bars.back().timestamp, std::int64_t{1'700'000'600});
 }
 
 QTEST_GUILESS_MAIN(HistoricalDataStoreTests)
