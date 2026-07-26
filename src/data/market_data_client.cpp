@@ -1,6 +1,7 @@
 #include "data/market_data_client.hpp"
 
 #include "data/market_data_parser.hpp"
+#include "watchlists/watchlist_workspace.hpp"
 
 #include <QDateTime>
 #ifndef Q_OS_ANDROID
@@ -73,6 +74,30 @@ struct YahooQuery {
     return symbol.trimmed().toUpper();
 }
 
+[[nodiscard]] QString validateRequest(
+    const QString& symbol,
+    const Timeframe timeframe) {
+    switch (timeframe) {
+    case Timeframe::OneMinute:
+    case Timeframe::FiveMinutes:
+    case Timeframe::FifteenMinutes:
+    case Timeframe::OneHour:
+    case Timeframe::OneDay:
+        break;
+    default:
+        return QStringLiteral("The requested market-data timeframe is invalid.");
+    }
+    const NamedWatchlist candidate{
+        .id = QStringLiteral("market-data-validation"),
+        .name = QStringLiteral("Market data validation"),
+        .entries = {{.symbol = symbol}},
+    };
+    if (!validateWatchlist(candidate).isEmpty()) {
+        return QStringLiteral("The requested market-data symbol is invalid.");
+    }
+    return {};
+}
+
 #ifndef Q_OS_ANDROID
 [[nodiscard]] QNetworkRequest marketDataRequest(const QUrl& url) {
     QNetworkRequest request(url);
@@ -121,8 +146,17 @@ void MarketDataClient::fetch(
     const Timeframe timeframe,
     Callback callback) {
     cancel();
+    if (!callback) {
+        return;
+    }
+    symbol = normalizeWatchlistSymbol(std::move(symbol));
+    if (const auto error = validateRequest(symbol, timeframe);
+        !error.isEmpty()) {
+        callback({.error = error});
+        return;
+    }
     const auto requestGeneration = generation_;
-    requestYahoo(symbol.trimmed(), timeframe, requestGeneration, std::move(callback));
+    requestYahoo(symbol, timeframe, requestGeneration, std::move(callback));
 }
 
 void MarketDataClient::cancel() {
@@ -178,7 +212,9 @@ void MarketDataClient::requestYahoo(
             const int httpStatus,
             QByteArray payload,
             QString transportError) mutable {
-            activeRequestToken_ = 0;
+            if (requestGeneration == generation_) {
+                activeRequestToken_ = 0;
+            }
             processYahooResponse(
                 symbol,
                 timeframe,
@@ -254,7 +290,9 @@ void MarketDataClient::requestTwelveData(
             const int httpStatus,
             QByteArray payload,
             QString transportError) mutable {
-            activeRequestToken_ = 0;
+            if (requestGeneration == generation_) {
+                activeRequestToken_ = 0;
+            }
             processTwelveDataResponse(
                 requestGeneration,
                 std::move(yahooError),

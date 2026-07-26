@@ -24,19 +24,36 @@ struct CsvLineResult {
     QStringList fields;
     QString current;
     bool quoted = false;
+    bool closedQuote = false;
 
     for (qsizetype index = 0; index < line.size(); ++index) {
         const auto character = line[index];
-        if (character == u'"') {
-            if (quoted && index + 1 < line.size() && line[index + 1] == u'"') {
-                current.append(u'"');
-                ++index;
+        if (quoted) {
+            if (character == u'"') {
+                if (index + 1 < line.size() && line[index + 1] == u'"') {
+                    current.append(u'"');
+                    ++index;
+                } else {
+                    quoted = false;
+                    closedQuote = true;
+                }
             } else {
-                quoted = !quoted;
+                current.append(character);
             }
-        } else if (character == u',' && !quoted) {
+            continue;
+        }
+        if (closedQuote && character != u',') {
+            return {.error = QStringLiteral("unexpected text after quoted field")};
+        }
+        if (character == u',') {
             fields.push_back(current.trimmed());
             current.clear();
+            closedQuote = false;
+        } else if (character == u'"') {
+            if (!current.isEmpty()) {
+                return {.error = QStringLiteral("unexpected quote in unquoted field")};
+            }
+            quoted = true;
         } else {
             current.append(character);
         }

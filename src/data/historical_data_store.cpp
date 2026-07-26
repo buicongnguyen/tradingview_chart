@@ -501,9 +501,13 @@ CachedHistoricalSeries HistoricalDataStore::loadLatestSeries(
 
     QSqlQuery query(impl_->database);
     query.prepare(QStringLiteral(
-        "SELECT provider FROM historical_series "
-        "WHERE symbol=? AND timeframe=? "
-        "ORDER BY cached_at_utc_ms DESC,retrieved_at_utc DESC,provider ASC "
+        "SELECT s.provider FROM historical_series s "
+        "JOIN historical_bars b ON b.provider=s.provider AND "
+        "b.symbol=s.symbol AND b.timeframe=s.timeframe "
+        "WHERE s.symbol=? AND s.timeframe=? "
+        "GROUP BY s.provider,s.symbol,s.timeframe "
+        "ORDER BY MAX(b.timestamp) DESC,s.cached_at_utc_ms DESC,"
+        "s.retrieved_at_utc DESC,s.provider ASC "
         "LIMIT 1"));
     query.addBindValue(symbol);
     query.addBindValue(static_cast<int>(timeframe));

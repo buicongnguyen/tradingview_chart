@@ -29,6 +29,9 @@ rate limits, terms, and market-data display rights still apply.
   Overlapping downloads are transactionally upserted without deleting older
   non-overlapping bars, and each series retains provider, market metadata,
   retrieval time, and cache time. Synthetic demo data is never cached.
+- A provider candle whose interval is still forming remains visible on the
+  chart but is excluded from cache, replay, backtests, scans, and alerts until
+  its interval has completed.
 - Bounded network/CSV reads, formula-safe spreadsheet exports, bounded research
   targets, and Android packaging that cannot silently replace the established
   signing identity or overwrite a signed APK with an unsigned build.
@@ -133,7 +136,8 @@ The refresh retrieves the selected company's overview followed by its earnings
 calendar. It is deliberately manual to conserve provider quotas. Provider
 availability, endpoint entitlement, request limits, and field coverage depend
 on the account and can change. A failed calendar request keeps a valid company
-overview and reports the calendar warning.
+overview and any previously loaded earnings dates, and reports the calendar
+warning.
 
 The provider's `AnalystTargetPrice` is labeled as an aggregate and is never
 mixed into the locally recorded organization-level target calculation.

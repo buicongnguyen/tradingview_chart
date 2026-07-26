@@ -4,6 +4,7 @@
 #include "chart/chart_bridge.hpp"
 #include "data/demo_data_source.hpp"
 #include "data/market_data_client.hpp"
+#include "watchlists/watchlist_workspace.hpp"
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -186,16 +187,16 @@ qreal MobileController::bottomSystemInset() const noexcept {
 }
 
 void MobileController::refresh(QString symbol, const int timeframeIndex) {
-    symbol = symbol.trimmed().toUpper();
-    if (symbol.isEmpty()) {
-        setStatus(QStringLiteral("Enter a symbol before refreshing."));
-        return;
-    }
-    if (symbol.size() > 32 ||
-        std::any_of(symbol.cbegin(), symbol.cend(), [](const QChar character) {
-            return character.isSpace() || !character.isPrint();
-        })) {
-        setStatus(QStringLiteral("The symbol must be 1–32 characters without spaces."));
+    symbol = normalizeWatchlistSymbol(std::move(symbol));
+    const NamedWatchlist candidate{
+        .id = QStringLiteral("mobile-market-data"),
+        .name = QStringLiteral("Mobile market data"),
+        .entries = {{.symbol = symbol}},
+    };
+    if (!validateWatchlist(candidate).isEmpty()) {
+        setStatus(
+            QStringLiteral(
+                "Enter a valid 1–32 character market symbol."));
         return;
     }
 
@@ -267,7 +268,11 @@ void MobileController::chartLoaded() {
     }
     chartLoaded_ = true;
     chartBridge_->webReady();
-    setStatus(QStringLiteral("Chart ready · fetching real market data…"));
+    if (busy_) {
+        setStatus(QStringLiteral("Chart ready · fetching real market data…"));
+    } else if (status_ == QStringLiteral("Preparing chart…")) {
+        setStatus(QStringLiteral("Chart ready · displaying local demo data."));
+    }
 }
 
 void MobileController::setTwelveDataKey(const QString& apiKey) {

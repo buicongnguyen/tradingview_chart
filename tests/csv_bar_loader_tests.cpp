@@ -19,6 +19,7 @@ private slots:
     void parsesUnixAndIsoTimestamps();
     void rejectsMissingHeader();
     void rejectsDuplicateHeader();
+    void rejectsMalformedQuotedField();
     void rejectsInvalidOhlc();
     void rejectsDuplicateTimestamp();
     void treatsNaiveIsoTimestampAsUtc();
@@ -28,6 +29,7 @@ private slots:
     void demoDataIsStableAcrossRefreshes();
     void parsesYahooChartResponse();
     void rejectsUnsafeYahooTimestamp();
+    void rejectsConflictingProviderTimestamps();
     void parsesTwelveDataResponseInAscendingOrder();
     void appliesTwelveDataTimezone();
     void reportsProviderErrors();
@@ -63,6 +65,15 @@ void CsvBarLoaderTests::rejectsDuplicateHeader() {
 
     QVERIFY(!result.ok());
     QVERIFY(result.error.contains(QStringLiteral("Duplicate column")));
+}
+
+void CsvBarLoaderTests::rejectsMalformedQuotedField() {
+    const auto result = tvchart::CsvBarLoader::parse(QStringLiteral(
+        "timestamp,open,high,low,close,volume\n"
+        "1700000000,10\"0,104,99,102,1000\n"));
+
+    QVERIFY(!result.ok());
+    QVERIFY(result.error.contains(QStringLiteral("unexpected quote")));
 }
 
 void CsvBarLoaderTests::rejectsInvalidOhlc() {
@@ -209,6 +220,31 @@ void CsvBarLoaderTests::rejectsUnsafeYahooTimestamp() {
     QVERIFY(result.error.contains(QStringLiteral("no usable")));
 }
 
+void CsvBarLoaderTests::rejectsConflictingProviderTimestamps() {
+    const auto result = tvchart::MarketDataParser::parseYahoo(R"json(
+        {
+          "chart": {
+            "result": [{
+              "timestamp": [1700000000, 1700000000],
+              "indicators": {
+                "quote": [{
+                  "open": [100.0, 100.0],
+                  "high": [104.0, 105.0],
+                  "low": [99.0, 99.0],
+                  "close": [102.0, 103.0],
+                  "volume": [1000, 1000]
+                }]
+              }
+            }],
+            "error": null
+          }
+        }
+    )json");
+
+    QVERIFY(!result.ok());
+    QVERIFY(result.error.contains(QStringLiteral("conflicting bars")));
+}
+
 void CsvBarLoaderTests::parsesTwelveDataResponseInAscendingOrder() {
     const auto result = tvchart::MarketDataParser::parseTwelveData(R"json(
         {
@@ -239,6 +275,13 @@ void CsvBarLoaderTests::parsesTwelveDataResponseInAscendingOrder() {
     QVERIFY2(result.ok(), qPrintable(result.error));
     QCOMPARE(result.bars.size(), std::size_t{2});
     QVERIFY(result.bars.front().timestamp < result.bars.back().timestamp);
+    const auto expected =
+        QDateTime(
+            QDate(2026, 7, 24),
+            QTime(9, 30),
+            QTimeZone(QByteArrayLiteral("America/New_York")))
+            .toSecsSinceEpoch();
+    QCOMPARE(result.bars.front().timestamp, expected);
     QCOMPARE(result.bars.front().open, 100.0);
     QCOMPARE(result.bars.back().close, 105.0);
     QCOMPARE(result.metadata.exchange, QStringLiteral("NASDAQ"));

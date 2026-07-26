@@ -18,6 +18,7 @@ namespace tvchart {
 struct AlphaVantageResearchResult {
     CompanyResearchSnapshot snapshot;
     std::vector<ResearchEvent> events;
+    bool earningsCalendarUpdated{};
     QString warning;
     QString error;
 

@@ -145,15 +145,41 @@ constexpr auto kMaximumTargetPrice = 1'000'000'000.0;
     return value ? QJsonValue(*value) : QJsonValue(QJsonValue::Null);
 }
 
-[[nodiscard]] std::optional<double> readOptionalNumber(
+struct OptionalNumberParseResult {
+    std::optional<double> value;
+    bool valid{};
+};
+
+[[nodiscard]] OptionalNumberParseResult readOptionalNumber(
     const QJsonValue& value) {
+    if (value.isNull()) {
+        return {.valid = true};
+    }
     if (!value.isDouble()) {
-        return std::nullopt;
+        return {};
     }
     const auto number = value.toDouble();
     return std::isfinite(number)
-               ? std::optional<double>{number}
-               : std::nullopt;
+               ? OptionalNumberParseResult{
+                     .value = number,
+                     .valid = true,
+                 }
+               : OptionalNumberParseResult{};
+}
+
+[[nodiscard]] bool readRatingCount(
+    const QJsonValue& value,
+    int& result) {
+    if (!value.isDouble()) {
+        return false;
+    }
+    const auto number = value.toDouble();
+    if (!std::isfinite(number) || std::trunc(number) != number ||
+        number < 0.0 || number > 100'000.0) {
+        return false;
+    }
+    result = static_cast<int>(number);
+    return true;
 }
 
 [[nodiscard]] QJsonObject eventToJson(const ResearchEvent& event) {
@@ -522,6 +548,14 @@ ResearchWorkspaceLoadResult deserializeResearchWorkspace(
         ResearchWorkspace::currentSchemaVersion) {
         return {.error = QStringLiteral("Saved research schema is unsupported.")};
     }
+    if (!root.value(QStringLiteral("events")).isArray() ||
+        !root.value(QStringLiteral("targetEstimates")).isArray() ||
+        !root.value(QStringLiteral("companySnapshots")).isArray()) {
+        return {
+            .error =
+                QStringLiteral("Saved research collections are invalid."),
+        };
+    }
     const auto eventValues = root.value(QStringLiteral("events")).toArray();
     const auto targetValues =
         root.value(QStringLiteral("targetEstimates")).toArray();
@@ -548,6 +582,10 @@ ResearchWorkspaceLoadResult deserializeResearchWorkspace(
         const auto asOf = object.value(QStringLiteral("asOfUtc"))
                               .toString()
                               .toLongLong(&timestampOk);
+        const auto estimate = readOptionalNumber(
+            object.value(QStringLiteral("estimate")));
+        const auto actual = readOptionalNumber(
+            object.value(QStringLiteral("actual")));
         ResearchEvent event{
             .id = object.value(QStringLiteral("id")).toString(),
             .symbol = normalizeWatchlistSymbol(
@@ -563,15 +601,13 @@ ResearchWorkspaceLoadResult deserializeResearchWorkspace(
             .asOfUtc = timestampOk ? asOf : 0,
             .confidence =
                 confidence.value_or(ResearchConfidence::Unknown),
-            .estimate =
-                readOptionalNumber(object.value(QStringLiteral("estimate"))),
-            .actual =
-                readOptionalNumber(object.value(QStringLiteral("actual"))),
+            .estimate = estimate.value,
+            .actual = actual.value,
             .currency =
                 object.value(QStringLiteral("currency")).toString(),
             .detail = object.value(QStringLiteral("detail")).toString(),
         };
-        if (!type || !confidence ||
+        if (!type || !confidence || !estimate.valid || !actual.valid ||
             !validateResearchEvent(event).isEmpty() ||
             std::ranges::find(identities, event.id) != identities.end()) {
             return {.error = QStringLiteral("Saved research event is invalid.")};
@@ -617,6 +653,39 @@ ResearchWorkspaceLoadResult deserializeResearchWorkspace(
         const auto asOf = object.value(QStringLiteral("asOfUtc"))
                               .toString()
                               .toLongLong(&timestampOk);
+        const auto marketCapitalization = readOptionalNumber(
+            object.value(QStringLiteral("marketCapitalization")));
+        const auto eps =
+            readOptionalNumber(object.value(QStringLiteral("eps")));
+        const auto peRatio =
+            readOptionalNumber(object.value(QStringLiteral("peRatio")));
+        const auto forwardPe =
+            readOptionalNumber(object.value(QStringLiteral("forwardPe")));
+        const auto beta =
+            readOptionalNumber(object.value(QStringLiteral("beta")));
+        const auto week52High =
+            readOptionalNumber(object.value(QStringLiteral("week52High")));
+        const auto week52Low =
+            readOptionalNumber(object.value(QStringLiteral("week52Low")));
+        const auto analystTargetPrice = readOptionalNumber(
+            object.value(QStringLiteral("analystTargetPrice")));
+        AnalystRatingCounts ratings;
+        const auto ratingsValid =
+            readRatingCount(
+                object.value(QStringLiteral("ratingStrongBuy")),
+                ratings.strongBuy) &&
+            readRatingCount(
+                object.value(QStringLiteral("ratingBuy")),
+                ratings.buy) &&
+            readRatingCount(
+                object.value(QStringLiteral("ratingHold")),
+                ratings.hold) &&
+            readRatingCount(
+                object.value(QStringLiteral("ratingSell")),
+                ratings.sell) &&
+            readRatingCount(
+                object.value(QStringLiteral("ratingStrongSell")),
+                ratings.strongSell);
         CompanyResearchSnapshot snapshot{
             .symbol = normalizeWatchlistSymbol(
                 object.value(QStringLiteral("symbol")).toString()),
@@ -632,31 +701,21 @@ ResearchWorkspaceLoadResult deserializeResearchWorkspace(
             .sector = object.value(QStringLiteral("sector")).toString(),
             .industry =
                 object.value(QStringLiteral("industry")).toString(),
-            .marketCapitalization = readOptionalNumber(
-                object.value(QStringLiteral("marketCapitalization"))),
-            .eps = readOptionalNumber(object.value(QStringLiteral("eps"))),
-            .peRatio =
-                readOptionalNumber(object.value(QStringLiteral("peRatio"))),
-            .forwardPe =
-                readOptionalNumber(object.value(QStringLiteral("forwardPe"))),
-            .beta = readOptionalNumber(object.value(QStringLiteral("beta"))),
-            .week52High =
-                readOptionalNumber(object.value(QStringLiteral("week52High"))),
-            .week52Low =
-                readOptionalNumber(object.value(QStringLiteral("week52Low"))),
-            .analystTargetPrice = readOptionalNumber(
-                object.value(QStringLiteral("analystTargetPrice"))),
-            .ratings = {
-                .strongBuy =
-                    object.value(QStringLiteral("ratingStrongBuy")).toInt(),
-                .buy = object.value(QStringLiteral("ratingBuy")).toInt(),
-                .hold = object.value(QStringLiteral("ratingHold")).toInt(),
-                .sell = object.value(QStringLiteral("ratingSell")).toInt(),
-                .strongSell =
-                    object.value(QStringLiteral("ratingStrongSell")).toInt(),
-            },
+            .marketCapitalization = marketCapitalization.value,
+            .eps = eps.value,
+            .peRatio = peRatio.value,
+            .forwardPe = forwardPe.value,
+            .beta = beta.value,
+            .week52High = week52High.value,
+            .week52Low = week52Low.value,
+            .analystTargetPrice = analystTargetPrice.value,
+            .ratings = ratings,
         };
-        if (!timestampOk || !validateCompanySnapshot(snapshot).isEmpty()) {
+        if (!timestampOk || !marketCapitalization.valid || !eps.valid ||
+            !peRatio.valid || !forwardPe.valid || !beta.valid ||
+            !week52High.valid || !week52Low.valid ||
+            !analystTargetPrice.valid || !ratingsValid ||
+            !validateCompanySnapshot(snapshot).isEmpty()) {
             return {.error = QStringLiteral("Saved company research is invalid.")};
         }
         workspace.companySnapshots.push_back(std::move(snapshot));

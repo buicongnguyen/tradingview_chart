@@ -78,9 +78,17 @@ void AlphaVantageResearchClient::fetch(
     Callback callback) {
     cancel();
     symbol = normalizeWatchlistSymbol(std::move(symbol));
-    if (symbol.isEmpty()) {
+    if (!callback) {
+        return;
+    }
+    const NamedWatchlist candidate{
+        .id = QStringLiteral("research-validation"),
+        .name = QStringLiteral("Research validation"),
+        .entries = {{.symbol = symbol}},
+    };
+    if (!validateWatchlist(candidate).isEmpty()) {
         callback({
-            .error = QStringLiteral("A research symbol is required."),
+            .error = QStringLiteral("A valid research symbol is required."),
         });
         return;
     }
@@ -193,6 +201,7 @@ void AlphaVantageResearchClient::requestCalendar(
                 activeReply_.clear();
             }
             auto warning = responseError(response);
+            auto earningsCalendarUpdated = false;
             if (warning.isEmpty()) {
                 auto parsed =
                     AlphaVantageResearchParser::parseEarningsCalendar(
@@ -211,6 +220,7 @@ void AlphaVantageResearchClient::requestCalendar(
                         events.end(),
                         std::make_move_iterator(parsed.events.begin()),
                         std::make_move_iterator(parsed.events.end()));
+                    earningsCalendarUpdated = true;
                 } else {
                     warning = std::move(parsed.error);
                 }
@@ -218,6 +228,7 @@ void AlphaVantageResearchClient::requestCalendar(
             callback({
                 .snapshot = std::move(snapshot),
                 .events = std::move(events),
+                .earningsCalendarUpdated = earningsCalendarUpdated,
                 .warning = std::move(warning),
             });
         });

@@ -12,12 +12,14 @@ class StrategyEngineTests final : public QObject {
 private slots:
     void roundTripsReusableStrategy();
     void evaluatesWarmupAndCrossingWithoutLookAhead();
+    void resolvesDecisiveMultiConditionGroupsDuringWarmup();
     void reportsIndicatorOverflowWithoutThrowing();
     void executesSignalsAtNextOpenAndAppliesCosts();
     void rejectsImpossibleExitCosts();
     void forceClosesAndReconcilesFinalEquity();
     void scansUnavailableSeriesAndDeduplicatesAlerts();
     void replaysWithinDeterministicBoundaries();
+    void excludesAStillFormingProviderBar();
 };
 
 namespace {
@@ -112,6 +114,56 @@ void StrategyEngineTests::evaluatesWarmupAndCrossingWithoutLookAhead() {
     const auto unavailable = evaluator.evaluate(warmup, bars.size() - 1);
     QVERIFY(!unavailable.available);
     QVERIFY(unavailable.detail.contains(QStringLiteral("warm-up")));
+}
+
+void StrategyEngineTests::resolvesDecisiveMultiConditionGroupsDuringWarmup() {
+    const auto bars = sampleBars();
+    tvchart::StrategyEvaluator evaluator(bars);
+    const tvchart::StrategyCondition warmingRsi{
+        .left = {
+            .field = tvchart::StrategyField::RelativeStrengthIndex,
+            .period = 14,
+        },
+        .comparison = tvchart::StrategyComparison::GreaterThan,
+        .constant = 50.0,
+    };
+    const tvchart::StrategyCondition positiveClose{
+        .left = {.field = tvchart::StrategyField::Close},
+        .comparison = tvchart::StrategyComparison::GreaterThan,
+        .constant = 0.0,
+    };
+    const tvchart::StrategyCondition impossibleClose{
+        .left = {.field = tvchart::StrategyField::Close},
+        .comparison = tvchart::StrategyComparison::LessThan,
+        .constant = 0.0,
+    };
+
+    const auto any = evaluator.evaluate(
+        {
+            .match = tvchart::ConditionMatch::Any,
+            .conditions = {warmingRsi, positiveClose},
+        },
+        bars.size() - 1);
+    QVERIFY(any.available);
+    QVERIFY(any.matched);
+
+    const auto all = evaluator.evaluate(
+        {
+            .match = tvchart::ConditionMatch::All,
+            .conditions = {warmingRsi, impossibleClose},
+        },
+        bars.size() - 1);
+    QVERIFY(all.available);
+    QVERIFY(!all.matched);
+
+    const auto undecidable = evaluator.evaluate(
+        {
+            .match = tvchart::ConditionMatch::Any,
+            .conditions = {warmingRsi, impossibleClose},
+        },
+        bars.size() - 1);
+    QVERIFY(!undecidable.available);
+    QVERIFY(undecidable.detail.contains(QStringLiteral("warm-up")));
 }
 
 void StrategyEngineTests::executesSignalsAtNextOpenAndAppliesCosts() {
@@ -273,6 +325,23 @@ void StrategyEngineTests::replaysWithinDeterministicBoundaries() {
     QVERIFY(replay.finished());
     QCOMPARE(replay.visibleBars(), bars);
     QVERIFY(!replay.step());
+}
+
+void StrategyEngineTests::excludesAStillFormingProviderBar() {
+    const auto bars = sampleBars();
+    const auto finalStart = bars.back().timestamp;
+    QCOMPARE(
+        tvchart::completedBarCount(
+            bars,
+            tvchart::Timeframe::FiveMinutes,
+            finalStart + 299),
+        bars.size() - 1);
+    QCOMPARE(
+        tvchart::completedBarCount(
+            bars,
+            tvchart::Timeframe::FiveMinutes,
+            finalStart + 300),
+        bars.size());
 }
 
 QTEST_APPLESS_MAIN(StrategyEngineTests)

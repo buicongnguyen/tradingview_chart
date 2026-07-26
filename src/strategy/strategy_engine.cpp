@@ -161,7 +161,7 @@ RuleEvaluation StrategyEvaluator::evaluate(
         };
     }
 
-    bool aggregate = group.match == ConditionMatch::All;
+    QString unavailableDetail;
     for (const auto& condition : group.conditions) {
         const auto leftNow = value(condition.left, barIndex);
         const auto rightNow =
@@ -169,13 +169,13 @@ RuleEvaluation StrategyEvaluator::evaluate(
                 ? value(*condition.right, barIndex)
                 : std::optional<double>{condition.constant};
         if (!leftNow || !rightNow) {
-            return {
-                .timestamp = bars_[barIndex].timestamp,
-                .detail =
+            if (unavailableDetail.isEmpty()) {
+                unavailableDetail =
                     calculationError_.isEmpty()
                         ? QStringLiteral("Indicator warm-up is incomplete.")
-                        : calculationError_,
-            };
+                        : calculationError_;
+            }
+            continue;
         }
 
         bool matched = false;
@@ -189,11 +189,11 @@ RuleEvaluation StrategyEvaluator::evaluate(
         case StrategyComparison::CrossesAbove:
         case StrategyComparison::CrossesBelow: {
             if (barIndex == 0) {
-                return {
-                    .timestamp = bars_[barIndex].timestamp,
-                    .detail =
-                        QStringLiteral("Crossing rules require a previous bar."),
-                };
+                if (unavailableDetail.isEmpty()) {
+                    unavailableDetail =
+                        QStringLiteral("Crossing rules require a previous bar.");
+                }
+                continue;
             }
             const auto leftPrevious =
                 value(condition.left, barIndex - 1);
@@ -202,13 +202,13 @@ RuleEvaluation StrategyEvaluator::evaluate(
                     ? value(*condition.right, barIndex - 1)
                     : std::optional<double>{condition.constant};
             if (!leftPrevious || !rightPrevious) {
-                return {
-                    .timestamp = bars_[barIndex].timestamp,
-                    .detail =
+                if (unavailableDetail.isEmpty()) {
+                    unavailableDetail =
                         calculationError_.isEmpty()
                             ? QStringLiteral("Indicator warm-up is incomplete.")
-                            : calculationError_,
-                };
+                            : calculationError_;
+                }
+                continue;
             }
             matched =
                 condition.comparison == StrategyComparison::CrossesAbove
@@ -220,18 +220,32 @@ RuleEvaluation StrategyEvaluator::evaluate(
         }
         }
 
-        if (group.match == ConditionMatch::All) {
-            aggregate = aggregate && matched;
-        } else {
-            aggregate = aggregate || matched;
+        if ((group.match == ConditionMatch::All && !matched) ||
+            (group.match == ConditionMatch::Any && matched)) {
+            return {
+                .available = true,
+                .matched = matched,
+                .timestamp = bars_[barIndex].timestamp,
+                .detail =
+                    matched
+                        ? QStringLiteral("Rule matched.")
+                        : QStringLiteral("Rule did not match."),
+            };
         }
     }
+    if (!unavailableDetail.isEmpty()) {
+        return {
+            .timestamp = bars_[barIndex].timestamp,
+            .detail = std::move(unavailableDetail),
+        };
+    }
+    const auto matched = group.match == ConditionMatch::All;
     return {
         .available = true,
-        .matched = aggregate,
+        .matched = matched,
         .timestamp = bars_[barIndex].timestamp,
         .detail =
-            aggregate
+            matched
                 ? QStringLiteral("Rule matched.")
                 : QStringLiteral("Rule did not match."),
     };
