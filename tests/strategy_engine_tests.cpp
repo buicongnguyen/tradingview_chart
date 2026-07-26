@@ -7,6 +7,8 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QDir>
+#include <QFile>
 #include <QTest>
 
 #include <array>
@@ -42,6 +44,7 @@ private slots:
     void simulatesNextOpenOrdersAcrossInteractionModes();
     void restoresSimulationSnapshotsDeterministically();
     void importsSafePineSubsetAndRejectsUnsupportedSemantics();
+    void validatesBundledOpenSourcePineExamples();
 };
 
 namespace {
@@ -1334,8 +1337,9 @@ importsSafePineSubsetAndRejectsUnsupportedSemantics() {
     const auto namedDirection =
         tvchart::importPineStrategy(
             QStringLiteral(
+                "// MIT-licensed example comment\n"
                 "//@version=5\n"
-                "strategy(\"Named direction\")\n"
+                "strategy(title=\"Named direction\", shorttitle=\"Named\")\n"
                 "enter = ta.crossover(close, ta.sma(close, 5))\n"
                 "leave = ta.crossunder(close, ta.sma(close, 5))\n"
                 "strategy.entry(id=\"Long\", direction=strategy.long, when=enter)\n"
@@ -1391,6 +1395,76 @@ importsSafePineSubsetAndRejectsUnsupportedSemantics() {
                    diagnostic.column >= 1 &&
                    !diagnostic.message.isEmpty();
         }));
+}
+
+void StrategyEngineTests::
+validatesBundledOpenSourcePineExamples() {
+    const auto readExample =
+        [](const QString& relativePath) {
+            const auto path =
+                QDir(QStringLiteral(TVCHART_SOURCE_DIR))
+                    .filePath(relativePath);
+            QFile file(path);
+            if (!file.open(
+                    QIODevice::ReadOnly |
+                    QIODevice::Text)) {
+                return QString{};
+            }
+            return QString::fromUtf8(file.readAll());
+        };
+    const std::array compatible{
+        QStringLiteral(
+            "examples/pine/compatible/opmau_sma_crossover_long_only.pine"),
+        QStringLiteral(
+            "examples/pine/compatible/eterna_ema_ribbon_long_only.pine"),
+        QStringLiteral(
+            "examples/pine/compatible/eterna_rsi_mean_reversion_long_only.pine"),
+    };
+    for (const auto& path : compatible) {
+        const auto source = readExample(path);
+        QVERIFY2(!source.isEmpty(), qPrintable(path));
+        const auto imported =
+            tvchart::importPineStrategy(source);
+        QVERIFY2(
+            imported.ok(),
+            qPrintable(
+                path +
+                QStringLiteral(": ") +
+                tvchart::pineNativeStrategyPreview(imported)));
+        QCOMPARE(
+            imported.strategy.entry.conditions.empty(),
+            false);
+        QCOMPARE(
+            imported.strategy.exit.conditions.empty(),
+            false);
+    }
+
+    const std::array upstream{
+        QStringLiteral(
+            "examples/pine/upstream/opmau_sma_crossover_strategy.pine"),
+        QStringLiteral(
+            "examples/pine/upstream/eterna_ema_ribbon_strategy.pine"),
+        QStringLiteral(
+            "examples/pine/upstream/eterna_momentum_combo_strategy.pine"),
+    };
+    for (const auto& path : upstream) {
+        const auto source = readExample(path);
+        QVERIFY2(!source.isEmpty(), qPrintable(path));
+        const auto imported =
+            tvchart::importPineStrategy(source);
+        QVERIFY2(
+            !imported.ok(),
+            qPrintable(
+                path +
+                QStringLiteral(
+                    " unexpectedly bypassed the safe subset.")));
+        QVERIFY(std::ranges::any_of(
+            imported.diagnostics,
+            [](const tvchart::PineDiagnostic& diagnostic) {
+                return diagnostic.severity ==
+                       tvchart::PineDiagnosticSeverity::Error;
+            }));
+    }
 }
 
 QTEST_APPLESS_MAIN(StrategyEngineTests)

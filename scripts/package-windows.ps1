@@ -4,7 +4,7 @@ param(
     [string]$Configuration = 'Release',
     [string]$QtRoot = '',
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
-    [string]$PackageName = 'TradeChartLab-1.1.0-win64'
+    [string]$PackageName = 'TradeChartLab-1.2.0-win64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -94,6 +94,8 @@ Copy-Item -LiteralPath (Join-Path $repositoryRoot 'LICENSE') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'assets\web\vendor\LICENSE.lightweight-charts') -Destination $stage
 Copy-Item -LiteralPath (Join-Path $repositoryRoot 'assets\web\vendor\NOTICE.lightweight-charts') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'examples\pine\licenses\opmau-MIT.txt') -Destination $stage
+Copy-Item -LiteralPath (Join-Path $repositoryRoot 'examples\pine\licenses\eterna-MIT.txt') -Destination $stage
 
 $originalVcInstallDirectory = $env:VCINSTALLDIR
 try {

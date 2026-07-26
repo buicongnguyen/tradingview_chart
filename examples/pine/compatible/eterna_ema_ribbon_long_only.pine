@@ -1,0 +1,33 @@
+//@version=5
+// Adapted from EternaHybridExchange/tradingview-strategies at commit
+// 882564096838e7a449d4666dd9f8771891b293ae.
+// Copyright (c) 2026 Eterna Hybrid Exchange. MIT License; see
+// ../licenses/eterna-MIT.txt.
+// Modified for TradeChart Lab: removed shorts, leverage, webhook alerts,
+// percent commission, and unsupported order arguments.
+strategy("Eterna EMA Ribbon - Long Only",
+    overlay=true,
+    initial_capital=10000,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=10)
+
+emaFast = input.int(9, "Fast EMA")
+emaMid = input.int(21, "Mid EMA")
+emaSlow = input.int(55, "Slow EMA")
+
+ema9 = ta.ema(close, emaFast)
+ema21 = ta.ema(close, emaMid)
+ema55 = ta.ema(close, emaSlow)
+
+bullishAlignment = ema9 > ema21 and ema21 > ema55
+enterLong = bullishAlignment and ta.crossover(close, ema9)
+exitLong = ta.crossunder(ema9, ema21)
+
+if enterLong
+    strategy.entry("Long", strategy.long)
+if exitLong
+    strategy.close("Long")
+
+plot(ema9, "EMA 9")
+plot(ema21, "EMA 21")
+plot(ema55, "EMA 55")

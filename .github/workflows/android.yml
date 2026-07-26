@@ -82,15 +82,15 @@ jobs:
           fi
           "$ANDROID_HOME/build-tools/36.0.0/aapt" list "$apk" |
             grep "assets/web/vendor/lightweight-charts.standalone.production.js"
-          cp "$apk" "$PWD/TradeChartLab-1.1.0-android-arm64-v8a-unsigned.apk"
-          sha256sum "$PWD/TradeChartLab-1.1.0-android-arm64-v8a-unsigned.apk" \
-            > "$PWD/TradeChartLab-1.1.0-android-arm64-v8a-unsigned.apk.sha256"
+          cp "$apk" "$PWD/TradeChartLab-1.2.0-android-arm64-v8a-unsigned.apk"
+          sha256sum "$PWD/TradeChartLab-1.2.0-android-arm64-v8a-unsigned.apk" \
+            > "$PWD/TradeChartLab-1.2.0-android-arm64-v8a-unsigned.apk.sha256"
 
       - name: Upload verified unsigned APK
         uses: actions/upload-artifact@v4
         with:
-          name: TradeChartLab-1.1.0-android-arm64-v8a-unsigned
+          name: TradeChartLab-1.2.0-android-arm64-v8a-unsigned
           path: |
-            TradeChartLab-1.1.0-android-arm64-v8a-unsigned.apk
-            TradeChartLab-1.1.0-android-arm64-v8a-unsigned.apk.sha256
+            TradeChartLab-1.2.0-android-arm64-v8a-unsigned.apk
+            TradeChartLab-1.2.0-android-arm64-v8a-unsigned.apk.sha256
           if-no-files-found: error

@@ -19,6 +19,7 @@ test("Android page is local-only and selects the native mobile host", async () =
   const html = await readFile(mobileUrl, "utf8");
   assert.doesNotMatch(html, /https?:\/\//i);
   assert.match(html, /connect-src 'none'/);
+  assert.match(html, /style-src 'self' 'sha256-[A-Za-z0-9+/]+=*'/);
   assert.match(html, /data-host="mobile"/);
   assert.doesNotMatch(html, /qwebchannel/i);
   assert.match(html, /vendor\/lightweight-charts\.standalone\.production\.js/);

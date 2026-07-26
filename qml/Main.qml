@@ -12,6 +12,7 @@ ApplicationWindow {
     visible: true
     title: qsTr("TradeChart Lab")
     color: Material.background
+    property bool controlsExpanded: root.width >= 360
 
     Material.theme: darkTheme.checked ? Material.Dark : Material.Light
     Material.accent: Material.Blue
@@ -20,7 +21,10 @@ ApplicationWindow {
         mobileController.refresh(symbolField.text, timeframeBox.currentIndex)
     }
 
-    Component.onCompleted: refreshMarketData()
+    Component.onCompleted: {
+        mobileController.setMarketStructureVisible(structureCheck.checked)
+        refreshMarketData()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -37,31 +41,37 @@ ApplicationWindow {
                 anchors.rightMargin: 8
 
                 Label {
-                    text: qsTr("TradeChart Lab")
-                    font.pixelSize: 20
+                    text: root.width < 360
+                        ? qsTr("TradeChart")
+                        : qsTr("TradeChart Lab")
+                    font.pixelSize: root.width < 360 ? 18 : 20
                     font.bold: true
                     Layout.fillWidth: true
+                    elide: Text.ElideRight
                 }
 
                 Switch {
                     id: darkTheme
-                    text: qsTr("Dark")
+                    text: root.width < 360 ? "" : qsTr("Dark")
+                    Accessible.name: qsTr("Dark theme")
                     checked: true
                     onToggled: mobileController.setDarkTheme(checked)
                 }
 
                 ToolButton {
+                    visible: root.width <= root.height
                     text: controls.visible ? "▲" : "▼"
                     Accessible.name: controls.visible
                         ? qsTr("Hide controls")
                         : qsTr("Show controls")
-                    onClicked: controls.visible = !controls.visible
+                    onClicked: root.controlsExpanded = !root.controlsExpanded
                 }
             }
         }
 
         Pane {
             id: controls
+            visible: root.controlsExpanded && root.width <= root.height
             Layout.fillWidth: true
             padding: 10
 
@@ -137,45 +147,73 @@ ApplicationWindow {
 
                 GridLayout {
                     Layout.fillWidth: true
-                    columns: 4
+                    columns: root.width < 400 ? 2 : 4
                     columnSpacing: 10
-                    rowSpacing: 2
+                    rowSpacing: 6
 
-                    Label {
-                        text: qsTr("Last")
-                        opacity: 0.7
-                    }
-                    Label {
-                        text: qsTr("Change")
-                        opacity: 0.7
-                    }
-                    Label {
-                        text: qsTr("Range")
-                        opacity: 0.7
-                    }
-                    Label {
-                        text: qsTr("Avg vol")
-                        opacity: 0.7
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        Label {
+                            text: qsTr("Last")
+                            opacity: 0.7
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: mobileController.latestPrice
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
                     }
 
-                    Label {
-                        text: mobileController.latestPrice
-                        font.bold: true
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        Label {
+                            text: qsTr("Change")
+                            opacity: 0.7
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: mobileController.priceChange
+                            font.bold: true
+                            elide: Text.ElideRight
+                            color: text.startsWith("-")
+                                ? Material.color(Material.Red)
+                                : Material.color(Material.Green)
+                        }
                     }
-                    Label {
-                        text: mobileController.priceChange
-                        font.bold: true
-                        color: text.startsWith("-")
-                            ? Material.color(Material.Red)
-                            : Material.color(Material.Green)
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        Label {
+                            text: qsTr("Range")
+                            opacity: 0.7
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: mobileController.loadedRange
+                            elide: Text.ElideRight
+                        }
                     }
-                    Label {
-                        text: mobileController.loadedRange
-                        elide: Text.ElideRight
-                        Layout.maximumWidth: 130
-                    }
-                    Label {
-                        text: mobileController.averageVolume
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        Label {
+                            text: qsTr("Avg vol")
+                            opacity: 0.7
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: mobileController.averageVolume
+                            elide: Text.ElideRight
+                        }
                     }
                 }
 
@@ -204,6 +242,13 @@ ApplicationWindow {
                     }
                 }
 
+                CheckBox {
+                    id: structureCheck
+                    text: qsTr("Show market-structure overlays")
+                    checked: false
+                    onToggled: mobileController.setMarketStructureVisible(checked)
+                }
+
                 Label {
                     Layout.fillWidth: true
                     text: qsTr("Yahoo Finance is queried first. The optional key remains only in memory for this session.")
@@ -218,11 +263,14 @@ ApplicationWindow {
             id: chartView
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.minimumHeight: 280
+            Layout.minimumHeight: root.width > root.height ? 180 : 280
             url: "file:///android_asset/web/mobile.html"
 
             onLoadingChanged: function(loadRequest) {
-                if (loadRequest.status === WebView.LoadSucceededStatus) {
+                if (loadRequest.status === WebView.LoadStartedStatus) {
+                    chartReadyPoll.stop()
+                    mobileController.beginChartLoad()
+                } else if (loadRequest.status === WebView.LoadSucceededStatus) {
                     chartReadyPoll.attempts = 0
                     chartReadyPoll.start()
                 } else if (loadRequest.status === WebView.LoadFailedStatus) {
@@ -291,6 +339,9 @@ ApplicationWindow {
                 Label {
                     text: mobileController.source + " · " +
                           mobileController.barCount + " bars"
+                    visible: root.width >= 400
+                    elide: Text.ElideRight
+                    Layout.maximumWidth: root.width * 0.38
                     opacity: 0.7
                     font.pixelSize: 11
                 }

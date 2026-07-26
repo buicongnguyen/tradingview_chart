@@ -1,0 +1,42 @@
+// This source code is subject to the terms of the MIT License
+// © opmau
+
+//@version=5
+strategy(title="SMA Crossover Strategy", shorttitle="SMA Cross",
+     overlay=true, initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.1)
+
+// --- Inputs ---
+fastLength = input.int(9,  title="Fast SMA Length", minval=1)
+slowLength = input.int(21, title="Slow SMA Length", minval=1)
+longOnly   = input.bool(true, title="Long Only")
+
+// --- Calculations ---
+fastSma = ta.sma(close, fastLength)
+slowSma = ta.sma(close, slowLength)
+
+// --- Signals ---
+bullishCross = ta.crossover(fastSma, slowSma)
+bearishCross = ta.crossunder(fastSma, slowSma)
+
+// --- Entries / Exits ---
+if bullishCross
+    strategy.entry("Long", strategy.long)
+
+if bearishCross
+    if longOnly
+        strategy.close("Long")
+    else
+        strategy.entry("Short", strategy.short)
+
+// --- Plots ---
+plot(fastSma, color=color.blue,   linewidth=2, title="Fast SMA")
+plot(slowSma, color=color.orange, linewidth=2, title="Slow SMA")
+
+plotshape(bullishCross, title="Bullish Cross",
+     style=shape.triangleup, location=location.belowbar,
+     color=color.green, size=size.small)
+plotshape(bearishCross, title="Bearish Cross",
+     style=shape.triangledown, location=location.abovebar,
+     color=color.red, size=size.small)

@@ -58,14 +58,24 @@ body {
   margin-left: auto;
 }
 
+@media (max-width: 360px) {
+  html[data-host="mobile"] #chart-header {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  html[data-host="mobile"] #source {
+    display: none;
+  }
+}
+
 #crosshair-details {
-  align-items: center;
   background: #171b26;
   border-bottom: 1px solid #2a2e39;
   color: #b2b5be;
-  display: flex;
+  display: block;
   font-size: 11px;
-  gap: 12px;
+  line-height: 27px;
   min-width: 0;
   overflow: hidden;
   padding: 0 12px;

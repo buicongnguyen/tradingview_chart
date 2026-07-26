@@ -275,16 +275,25 @@ void MobileController::setDarkTheme(const bool dark) {
     chartBridge_->setDarkTheme(dark);
 }
 
+void MobileController::setMarketStructureVisible(const bool visible) {
+    chartBridge_->setMarketStructureVisible(visible);
+}
+
 void MobileController::fitChart() {
     chartBridge_->requestFit();
 }
 
+void MobileController::beginChartLoad() {
+    chartLoaded_ = false;
+}
+
 void MobileController::chartLoaded() {
-    if (chartLoaded_) {
-        return;
-    }
+    const auto firstReady = !chartLoaded_ && !chartBridge_->isReady();
     chartLoaded_ = true;
     chartBridge_->webReady();
+    if (!firstReady) {
+        return;
+    }
     if (busy_) {
         setStatus(QStringLiteral("Chart ready · fetching real market data…"));
     } else if (status_ == QStringLiteral("Preparing chart…")) {

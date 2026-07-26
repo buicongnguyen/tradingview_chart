@@ -48,7 +48,9 @@ public:
     Q_INVOKABLE void setChartStyle(int styleIndex);
     Q_INVOKABLE void setIndicator(int indicatorIndex);
     Q_INVOKABLE void setDarkTheme(bool dark);
+    Q_INVOKABLE void setMarketStructureVisible(bool visible);
     Q_INVOKABLE void fitChart();
+    Q_INVOKABLE void beginChartLoad();
     Q_INVOKABLE void chartLoaded();
     Q_INVOKABLE void setTwelveDataKey(const QString& apiKey);
     Q_INVOKABLE void reportChartError(const QString& message);

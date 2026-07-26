@@ -5,4 +5,9 @@
     <file>assets/web/styles.css</file>
     <file>assets/web/vendor/lightweight-charts.standalone.production.js</file>
   </qresource>
+  <qresource prefix="/pine-examples">
+    <file alias="opmau_sma_crossover_long_only.pine">examples/pine/compatible/opmau_sma_crossover_long_only.pine</file>
+    <file alias="eterna_ema_ribbon_long_only.pine">examples/pine/compatible/eterna_ema_ribbon_long_only.pine</file>
+    <file alias="eterna_rsi_mean_reversion_long_only.pine">examples/pine/compatible/eterna_rsi_mean_reversion_long_only.pine</file>
+  </qresource>
 </RCC>

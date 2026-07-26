@@ -18,7 +18,8 @@ int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("buicongnguyen"));
     QCoreApplication::setApplicationName(QStringLiteral("TradeChartLab"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("1.1.0"));
+    QCoreApplication::setApplicationVersion(
+        QStringLiteral(TRADINGVIEW_CHART_VERSION));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
@@ -162,6 +163,12 @@ int main(int argc, char* argv[]) {
             auto* scriptApply =
                 window.findChild<QPushButton*>(
                     QStringLiteral("scriptApplyButton"));
+            auto* scriptExampleSelector =
+                window.findChild<QComboBox*>(
+                    QStringLiteral("scriptExampleSelector"));
+            auto* scriptLoadExample =
+                window.findChild<QPushButton*>(
+                    QStringLiteral("scriptLoadExampleButton"));
             if (!indicatorTable || !scaleSelector ||
                 !chartLayoutSelector || !scaleToolbarAction ||
                 !layoutToolbarAction || !targetTable ||
@@ -175,7 +182,9 @@ int main(int argc, char* argv[]) {
                 !theoryTable || !simulationAction ||
                 !simulationStart || !simulationSummary ||
                 !scriptAction || !scriptSource ||
-                !scriptCompile || !scriptApply) {
+                !scriptCompile || !scriptApply ||
+                !scriptExampleSelector ||
+                !scriptLoadExample) {
                 qCritical() << "SMOKE_ANALYSIS_CONTROLS_MISSING";
                 application.exit(4);
                 return;
@@ -241,20 +250,11 @@ int main(int argc, char* argv[]) {
                 return;
             }
             scriptAction->trigger();
-            scriptSource->setPlainText(
-                QStringLiteral(
-                    "//@version=6\n"
-                    "strategy(\"Smoke Script\")\n"
-                    "fast = ta.ema(close, 5)\n"
-                    "slow = ta.ema(close, 10)\n"
-                    "enterLong = ta.crossover(fast, slow)\n"
-                    "exitLong = ta.crossunder(fast, slow)\n"
-                    "if enterLong\n"
-                    "    strategy.entry(\"Long\", strategy.long)\n"
-                    "if exitLong\n"
-                    "    strategy.close(\"Long\")\n"));
-            scriptCompile->click();
-            if (!scriptApply->isEnabled()) {
+            scriptExampleSelector->setCurrentIndex(1);
+            scriptLoadExample->click();
+            if (!scriptApply->isEnabled() ||
+                !scriptSource->toPlainText().contains(
+                    QStringLiteral("opmau SMA Crossover"))) {
                 qCritical() << "SMOKE_SCRIPT_COMPILE_FAILED";
                 application.exit(16);
                 return;

@@ -4512,7 +4512,7 @@ void MainWindow::showAbout() {
     dialog.setMinimumWidth(560);
     auto* layout = new QVBoxLayout(&dialog);
     auto* label = new QLabel(
-        tr("<h2>TradeChart Lab 1.1.0</h2>"
+        tr("<h2>TradeChart Lab %1</h2>"
            "<p>A C++/Qt market chart, research, and simulation workbench.</p>"
            "<p>Charts are rendered by "
            "<a href=\"https://www.tradingview.com/\">TradingView "
@@ -4563,7 +4563,8 @@ void MainWindow::showAbout() {
            "forecasts or trading advice. Offline demo data is synthetic; "
            "imported CSV data and watchlist notes remain local.</p>"
            "<p>TradeChart Lab is an independent project and is not affiliated "
-           "with or endorsed by TradingView.</p>"),
+           "with or endorsed by TradingView.</p>")
+            .arg(QCoreApplication::applicationVersion()),
         &dialog);
     label->setWordWrap(true);
     label->setOpenExternalLinks(true);

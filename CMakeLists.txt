@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradeChartLab VERSION 1.1.0 LANGUAGES CXX)
+project(TradeChartLab VERSION 1.2.0 LANGUAGES CXX)
 
 option(
     TRADINGVIEW_CHART_BUILD_TESTS
@@ -90,6 +90,10 @@ add_library(tradingview_chart_core
 target_include_directories(tradingview_chart_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(tradingview_chart_core PUBLIC Qt6::Core Qt6::Sql)
 target_compile_features(tradingview_chart_core PUBLIC cxx_std_20)
+target_compile_definitions(
+    tradingview_chart_core
+    PUBLIC TRADINGVIEW_CHART_VERSION="${PROJECT_VERSION}"
+)
 
 if(MSVC)
     target_compile_options(tradingview_chart_core PRIVATE /W4 /permissive-)
@@ -192,7 +196,7 @@ if(ANDROID)
         QT_ANDROID_PACKAGE_SOURCE_DIR "${android_package_dir}"
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 36
-        QT_ANDROID_VERSION_CODE 1100
+        QT_ANDROID_VERSION_CODE 1200
         QT_ANDROID_VERSION_NAME "${PROJECT_VERSION}"
     )
 
@@ -325,6 +329,11 @@ if(TRADINGVIEW_CHART_BUILD_TESTS AND NOT ANDROID)
         Qt6::Core
         Qt6::Test
     )
+    target_compile_definitions(
+        tradingview_chart_strategy_tests
+        PRIVATE
+            TVCHART_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
     add_test(
         NAME tradingview_chart_strategy_tests
         COMMAND tradingview_chart_strategy_tests
@@ -437,6 +446,8 @@ if(NOT ANDROID)
         THIRD_PARTY_NOTICES.md
         assets/web/vendor/LICENSE.lightweight-charts
         assets/web/vendor/NOTICE.lightweight-charts
+        examples/pine/licenses/opmau-MIT.txt
+        examples/pine/licenses/eterna-MIT.txt
         DESTINATION licenses
     )
 endif()
