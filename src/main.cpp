@@ -5,13 +5,15 @@
 #include <QCommandLineParser>
 #include <QComboBox>
 #include <QDebug>
+#include <QDoubleSpinBox>
+#include <QTableWidget>
 #include <QTimer>
 
 int main(int argc, char* argv[]) {
     QApplication application(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("buicongnguyen"));
     QCoreApplication::setApplicationName(QStringLiteral("TradingViewChart"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("0.3.0"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(
@@ -77,29 +79,33 @@ int main(int argc, char* argv[]) {
                 application.exit(3);
             });
         QObject::connect(&window, &tvchart::MainWindow::chartReady, &application, [&]() {
-            auto* indicatorSelector =
-                window.findChild<QComboBox*>(QStringLiteral("indicatorSelector"));
-            if (!indicatorSelector) {
-                qCritical() << "SMOKE_INDICATOR_SELECTOR_MISSING";
+            auto* indicatorTable =
+                window.findChild<QTableWidget*>(QStringLiteral("indicatorTable"));
+            auto* scaleSelector =
+                window.findChild<QComboBox*>(QStringLiteral("scaleSelector"));
+            auto* targetTable = window.findChild<QTableWidget*>(
+                QStringLiteral("targetEstimateTable"));
+            auto* eventTable = window.findChild<QTableWidget*>(
+                QStringLiteral("researchEventTable"));
+            auto* marginValue = window.findChild<QDoubleSpinBox*>(
+                QStringLiteral("marginLongValueInput"));
+            if (!indicatorTable || !scaleSelector || !targetTable ||
+                !eventTable || !marginValue) {
+                qCritical() << "SMOKE_ANALYSIS_CONTROLS_MISSING";
                 application.exit(4);
                 return;
             }
-            indicatorSelector->setCurrentIndex(
-                indicatorSelector->findData(
-                    static_cast<int>(
-                        tvchart::IndicatorKind::RelativeStrengthIndex)));
-            QTimer::singleShot(250, &window, [indicatorSelector]() {
-                indicatorSelector->setCurrentIndex(
-                    indicatorSelector->findData(
-                        static_cast<int>(
-                            tvchart::IndicatorKind::
-                                MovingAverageConvergenceDivergence)));
+            indicatorTable->item(3, 0)->setCheckState(Qt::Checked);
+            scaleSelector->setCurrentIndex(
+                scaleSelector->findData(QStringLiteral("logarithmic")));
+            QTimer::singleShot(250, &window, [indicatorTable]() {
+                indicatorTable->item(4, 0)->setCheckState(Qt::Checked);
             });
-            QTimer::singleShot(500, &window, [indicatorSelector]() {
-                indicatorSelector->setCurrentIndex(
-                    indicatorSelector->findData(
-                        static_cast<int>(
-                            tvchart::IndicatorKind::SimpleMovingAverage)));
+            QTimer::singleShot(500, &window, [indicatorTable, scaleSelector]() {
+                indicatorTable->item(3, 0)->setCheckState(Qt::Unchecked);
+                indicatorTable->item(4, 0)->setCheckState(Qt::Unchecked);
+                scaleSelector->setCurrentIndex(
+                    scaleSelector->findData(QStringLiteral("percentage")));
             });
             QTimer::singleShot(750, &application, [&]() {
                 qInfo() << "SMOKE_OK";

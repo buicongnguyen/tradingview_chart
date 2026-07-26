@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -11,12 +12,6 @@
 namespace tvchart {
 namespace {
 
-constexpr auto kSmaPeriod = std::size_t{20};
-constexpr auto kEmaPeriod = std::size_t{20};
-constexpr auto kRsiPeriod = std::size_t{14};
-constexpr auto kMacdFastPeriod = std::size_t{12};
-constexpr auto kMacdSlowPeriod = std::size_t{26};
-constexpr auto kMacdSignalPeriod = std::size_t{9};
 constexpr auto kSecondsPerUtcDay = std::int64_t{24 * 60 * 60};
 
 void requireValidBars(const Bars& bars) {
@@ -62,23 +57,34 @@ void requireValidBars(const Bars& bars) {
     return result;
 }
 
-[[nodiscard]] IndicatorCalculation simpleMovingAverage(const Bars& bars) {
-    IndicatorCalculation result{.kind = IndicatorKind::SimpleMovingAverage};
-    if (bars.size() < kSmaPeriod) {
+[[nodiscard]] IndicatorCalculation makeCalculation(const IndicatorSpec& spec) {
+    return {
+        .kind = spec.kind,
+        .spec = spec,
+        .label = indicatorLabel(spec),
+    };
+}
+
+[[nodiscard]] IndicatorCalculation simpleMovingAverage(
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    auto result = makeCalculation(spec);
+    const auto period = static_cast<std::size_t>(spec.period);
+    if (bars.size() < period) {
         return result;
     }
 
     auto sum = 0.0L;
     for (std::size_t index = 0; index < bars.size(); ++index) {
         sum += static_cast<long double>(bars[index].close);
-        if (index >= kSmaPeriod) {
-            sum -= static_cast<long double>(bars[index - kSmaPeriod].close);
+        if (index >= period) {
+            sum -= static_cast<long double>(bars[index - period].close);
         }
-        if (index + 1 >= kSmaPeriod) {
+        if (index + 1 >= period) {
             result.primary.push_back({
                 .timestamp = bars[index].timestamp,
                 .value = finiteResult(
-                    sum / static_cast<long double>(kSmaPeriod),
+                    sum / static_cast<long double>(period),
                     "SMA"),
             });
         }
@@ -86,14 +92,18 @@ void requireValidBars(const Bars& bars) {
     return result;
 }
 
-[[nodiscard]] IndicatorCalculation exponentialMovingAverage(const Bars& bars) {
-    IndicatorCalculation result{.kind = IndicatorKind::ExponentialMovingAverage};
+[[nodiscard]] IndicatorCalculation exponentialMovingAverage(
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    auto result = makeCalculation(spec);
     std::vector<double> closes;
     closes.reserve(bars.size());
     for (const auto& bar : bars) {
         closes.push_back(bar.close);
     }
-    const auto values = exponentialMovingAverage(closes, kEmaPeriod);
+    const auto values = exponentialMovingAverage(
+        closes,
+        static_cast<std::size_t>(spec.period));
     for (std::size_t index = 0; index < values.size(); ++index) {
         if (values[index]) {
             result.primary.push_back({
@@ -105,10 +115,10 @@ void requireValidBars(const Bars& bars) {
     return result;
 }
 
-[[nodiscard]] IndicatorCalculation volumeWeightedAveragePrice(const Bars& bars) {
-    IndicatorCalculation result{
-        .kind = IndicatorKind::VolumeWeightedAveragePrice,
-    };
+[[nodiscard]] IndicatorCalculation volumeWeightedAveragePrice(
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    auto result = makeCalculation(spec);
     auto currentUtcDay = std::int64_t{-1};
     auto cumulativeNotional = 0.0L;
     auto cumulativeVolume = 0.0L;
@@ -141,22 +151,25 @@ void requireValidBars(const Bars& bars) {
     return result;
 }
 
-[[nodiscard]] IndicatorCalculation relativeStrengthIndex(const Bars& bars) {
-    IndicatorCalculation result{.kind = IndicatorKind::RelativeStrengthIndex};
-    if (bars.size() <= kRsiPeriod) {
+[[nodiscard]] IndicatorCalculation relativeStrengthIndex(
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    auto result = makeCalculation(spec);
+    const auto period = static_cast<std::size_t>(spec.period);
+    if (bars.size() <= period) {
         return result;
     }
 
     auto gains = 0.0L;
     auto losses = 0.0L;
-    for (std::size_t index = 1; index <= kRsiPeriod; ++index) {
+    for (std::size_t index = 1; index <= period; ++index) {
         const auto change = static_cast<long double>(bars[index].close) -
                             static_cast<long double>(bars[index - 1].close);
         gains += std::max(0.0L, change);
         losses += std::max(0.0L, -change);
     }
-    auto averageGain = gains / static_cast<long double>(kRsiPeriod);
-    auto averageLoss = losses / static_cast<long double>(kRsiPeriod);
+    auto averageGain = gains / static_cast<long double>(period);
+    auto averageLoss = losses / static_cast<long double>(period);
 
     const auto calculate = [](const long double gain, const long double loss) {
         if (loss == 0.0L) {
@@ -170,20 +183,20 @@ void requireValidBars(const Bars& bars) {
     };
 
     result.primary.push_back({
-        .timestamp = bars[kRsiPeriod].timestamp,
+        .timestamp = bars[period].timestamp,
         .value = finiteResult(calculate(averageGain, averageLoss), "RSI"),
     });
-    for (std::size_t index = kRsiPeriod + 1; index < bars.size(); ++index) {
+    for (std::size_t index = period + 1; index < bars.size(); ++index) {
         const auto change = static_cast<long double>(bars[index].close) -
                             static_cast<long double>(bars[index - 1].close);
         const auto gain = std::max(0.0L, change);
         const auto loss = std::max(0.0L, -change);
         averageGain =
-            ((averageGain * static_cast<long double>(kRsiPeriod - 1)) + gain) /
-            static_cast<long double>(kRsiPeriod);
+            ((averageGain * static_cast<long double>(period - 1)) + gain) /
+            static_cast<long double>(period);
         averageLoss =
-            ((averageLoss * static_cast<long double>(kRsiPeriod - 1)) + loss) /
-            static_cast<long double>(kRsiPeriod);
+            ((averageLoss * static_cast<long double>(period - 1)) + loss) /
+            static_cast<long double>(period);
         result.primary.push_back({
             .timestamp = bars[index].timestamp,
             .value = finiteResult(calculate(averageGain, averageLoss), "RSI"),
@@ -193,18 +206,21 @@ void requireValidBars(const Bars& bars) {
 }
 
 [[nodiscard]] IndicatorCalculation movingAverageConvergenceDivergence(
-    const Bars& bars) {
-    IndicatorCalculation result{
-        .kind = IndicatorKind::MovingAverageConvergenceDivergence,
-    };
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    auto result = makeCalculation(spec);
     std::vector<double> closes;
     closes.reserve(bars.size());
     for (const auto& bar : bars) {
         closes.push_back(bar.close);
     }
 
-    const auto fast = exponentialMovingAverage(closes, kMacdFastPeriod);
-    const auto slow = exponentialMovingAverage(closes, kMacdSlowPeriod);
+    const auto fast = exponentialMovingAverage(
+        closes,
+        static_cast<std::size_t>(spec.fastPeriod));
+    const auto slow = exponentialMovingAverage(
+        closes,
+        static_cast<std::size_t>(spec.slowPeriod));
     std::vector<double> macdValues;
     std::vector<std::size_t> macdIndexes;
     for (std::size_t index = 0; index < bars.size(); ++index) {
@@ -220,7 +236,9 @@ void requireValidBars(const Bars& bars) {
     }
 
     const auto signal =
-        exponentialMovingAverage(macdValues, kMacdSignalPeriod);
+        exponentialMovingAverage(
+            macdValues,
+            static_cast<std::size_t>(spec.signalPeriod));
     for (std::size_t index = 0; index < signal.size(); ++index) {
         if (!signal[index]) {
             continue;
@@ -240,30 +258,174 @@ void requireValidBars(const Bars& bars) {
     return result;
 }
 
+[[nodiscard]] IndicatorCalculation rollingExtreme(
+    const Bars& bars,
+    const IndicatorSpec& spec,
+    const bool high) {
+    auto result = makeCalculation(spec);
+    const auto period = static_cast<std::size_t>(spec.period);
+    if (bars.size() < period) {
+        return result;
+    }
+
+    for (std::size_t index = period - 1; index < bars.size(); ++index) {
+        auto value = high ? bars[index - period + 1].high
+                          : bars[index - period + 1].low;
+        for (auto window = index - period + 2; window <= index; ++window) {
+            value = high ? std::max(value, bars[window].high)
+                         : std::min(value, bars[window].low);
+        }
+        result.primary.push_back({
+            .timestamp = bars[index].timestamp,
+            .value = value,
+        });
+    }
+    return result;
+}
+
+[[nodiscard]] IndicatorCalculation volumeSimpleMovingAverage(
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    auto result = makeCalculation(spec);
+    const auto period = static_cast<std::size_t>(spec.period);
+    if (bars.size() < period) {
+        return result;
+    }
+
+    auto sum = 0.0L;
+    for (std::size_t index = 0; index < bars.size(); ++index) {
+        sum += static_cast<long double>(bars[index].volume);
+        if (index >= period) {
+            sum -= static_cast<long double>(bars[index - period].volume);
+        }
+        if (index + 1 >= period) {
+            result.primary.push_back({
+                .timestamp = bars[index].timestamp,
+                .value = finiteResult(
+                    sum / static_cast<long double>(period),
+                    "Volume SMA"),
+            });
+        }
+    }
+    return result;
+}
+
 } // namespace
+
+IndicatorSpec defaultIndicatorSpec(const IndicatorKind kind) noexcept {
+    IndicatorSpec spec{.kind = kind};
+    if (kind == IndicatorKind::RelativeStrengthIndex) {
+        spec.period = 14;
+    }
+    return spec;
+}
+
+std::string indicatorLabel(const IndicatorSpec& spec) {
+    std::ostringstream label;
+    switch (spec.kind) {
+    case IndicatorKind::None:
+        return "None";
+    case IndicatorKind::SimpleMovingAverage:
+        label << "SMA (" << spec.period << ')';
+        break;
+    case IndicatorKind::ExponentialMovingAverage:
+        label << "EMA (" << spec.period << ')';
+        break;
+    case IndicatorKind::VolumeWeightedAveragePrice:
+        return "VWAP (UTC session)";
+    case IndicatorKind::RelativeStrengthIndex:
+        label << "RSI (" << spec.period << ')';
+        break;
+    case IndicatorKind::MovingAverageConvergenceDivergence:
+        label << "MACD (" << spec.fastPeriod << ", " << spec.slowPeriod
+              << ", " << spec.signalPeriod << ')';
+        break;
+    case IndicatorKind::RollingHigh:
+        label << "Rolling high (" << spec.period << ')';
+        break;
+    case IndicatorKind::RollingLow:
+        label << "Rolling low (" << spec.period << ')';
+        break;
+    case IndicatorKind::VolumeSimpleMovingAverage:
+        label << "Volume SMA (" << spec.period << ')';
+        break;
+    }
+    return label.str();
+}
+
+bool validIndicatorSpec(const IndicatorSpec& spec) noexcept {
+    constexpr auto maximumPeriod = std::uint32_t{500};
+    switch (spec.kind) {
+    case IndicatorKind::None:
+    case IndicatorKind::VolumeWeightedAveragePrice:
+        return true;
+    case IndicatorKind::MovingAverageConvergenceDivergence:
+        return spec.fastPeriod > 0 &&
+               spec.slowPeriod > spec.fastPeriod &&
+               spec.slowPeriod <= maximumPeriod &&
+               spec.signalPeriod > 0 &&
+               spec.signalPeriod <= maximumPeriod;
+    case IndicatorKind::SimpleMovingAverage:
+    case IndicatorKind::ExponentialMovingAverage:
+    case IndicatorKind::RelativeStrengthIndex:
+    case IndicatorKind::RollingHigh:
+    case IndicatorKind::RollingLow:
+    case IndicatorKind::VolumeSimpleMovingAverage:
+        return spec.period > 0 && spec.period <= maximumPeriod;
+    }
+    return false;
+}
 
 IndicatorCalculation calculateIndicator(
     const Bars& bars,
     const IndicatorKind kind) {
-    if (kind == IndicatorKind::None) {
-        return {};
+    return calculateIndicator(bars, defaultIndicatorSpec(kind));
+}
+
+IndicatorCalculation calculateIndicator(
+    const Bars& bars,
+    const IndicatorSpec& spec) {
+    if (!validIndicatorSpec(spec)) {
+        throw std::invalid_argument("Invalid technical indicator parameters.");
+    }
+    if (spec.kind == IndicatorKind::None) {
+        return makeCalculation(spec);
     }
     requireValidBars(bars);
-    switch (kind) {
+    switch (spec.kind) {
     case IndicatorKind::None:
-        return {};
+        return makeCalculation(spec);
     case IndicatorKind::SimpleMovingAverage:
-        return simpleMovingAverage(bars);
+        return simpleMovingAverage(bars, spec);
     case IndicatorKind::ExponentialMovingAverage:
-        return exponentialMovingAverage(bars);
+        return exponentialMovingAverage(bars, spec);
     case IndicatorKind::VolumeWeightedAveragePrice:
-        return volumeWeightedAveragePrice(bars);
+        return volumeWeightedAveragePrice(bars, spec);
     case IndicatorKind::RelativeStrengthIndex:
-        return relativeStrengthIndex(bars);
+        return relativeStrengthIndex(bars, spec);
     case IndicatorKind::MovingAverageConvergenceDivergence:
-        return movingAverageConvergenceDivergence(bars);
+        return movingAverageConvergenceDivergence(bars, spec);
+    case IndicatorKind::RollingHigh:
+        return rollingExtreme(bars, spec, true);
+    case IndicatorKind::RollingLow:
+        return rollingExtreme(bars, spec, false);
+    case IndicatorKind::VolumeSimpleMovingAverage:
+        return volumeSimpleMovingAverage(bars, spec);
     }
-    return {};
+    return makeCalculation(spec);
+}
+
+std::vector<IndicatorCalculation> calculateIndicators(
+    const Bars& bars,
+    const std::vector<IndicatorSpec>& specs) {
+    std::vector<IndicatorCalculation> calculations;
+    calculations.reserve(specs.size());
+    for (const auto& spec : specs) {
+        if (spec.kind != IndicatorKind::None) {
+            calculations.push_back(calculateIndicator(bars, spec));
+        }
+    }
+    return calculations;
 }
 
 MarketStatistics calculateMarketStatistics(const Bars& bars) {

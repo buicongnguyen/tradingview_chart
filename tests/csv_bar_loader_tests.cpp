@@ -137,6 +137,14 @@ void CsvBarLoaderTests::parsesYahooChartResponse() {
         {
           "chart": {
             "result": [{
+              "meta": {
+                "fullExchangeName": "NasdaqGS",
+                "currency": "USD",
+                "exchangeTimezoneName": "America/New_York",
+                "instrumentType": "EQUITY",
+                "dataGranularity": "5m",
+                "exchangeDataDelayedBy": 0
+              },
               "timestamp": [1700000000, 1700000300, 1700000600],
               "indicators": {
                 "quote": [{
@@ -157,6 +165,12 @@ void CsvBarLoaderTests::parsesYahooChartResponse() {
     QCOMPARE(result.bars.size(), std::size_t{2});
     QCOMPARE(result.bars.front().timestamp, std::int64_t{1'700'000'000});
     QCOMPARE(result.bars.back().close, 105.0);
+    QCOMPARE(result.metadata.exchange, QStringLiteral("NasdaqGS"));
+    QCOMPARE(result.metadata.currency, QStringLiteral("USD"));
+    QCOMPARE(result.metadata.timezone, QStringLiteral("America/New_York"));
+    QCOMPARE(result.metadata.instrumentType, QStringLiteral("EQUITY"));
+    QCOMPARE(result.metadata.interval, QStringLiteral("5m"));
+    QCOMPARE(result.metadata.exchangeDelayMinutes, std::optional<int>{0});
 }
 
 void CsvBarLoaderTests::rejectsUnsafeYahooTimestamp() {
@@ -184,7 +198,14 @@ void CsvBarLoaderTests::rejectsUnsafeYahooTimestamp() {
 void CsvBarLoaderTests::parsesTwelveDataResponseInAscendingOrder() {
     const auto result = tvchart::MarketDataParser::parseTwelveData(R"json(
         {
-          "meta": {"symbol": "AAPL", "interval": "5min"},
+          "meta": {
+            "symbol": "AAPL",
+            "interval": "5min",
+            "currency": "USD",
+            "exchange": "NASDAQ",
+            "exchange_timezone": "America/New_York",
+            "type": "Common Stock"
+          },
           "values": [
             {
               "datetime": "2026-07-24 09:35:00",
@@ -206,6 +227,11 @@ void CsvBarLoaderTests::parsesTwelveDataResponseInAscendingOrder() {
     QVERIFY(result.bars.front().timestamp < result.bars.back().timestamp);
     QCOMPARE(result.bars.front().open, 100.0);
     QCOMPARE(result.bars.back().close, 105.0);
+    QCOMPARE(result.metadata.exchange, QStringLiteral("NASDAQ"));
+    QCOMPARE(result.metadata.currency, QStringLiteral("USD"));
+    QCOMPARE(result.metadata.timezone, QStringLiteral("America/New_York"));
+    QCOMPARE(result.metadata.instrumentType, QStringLiteral("Common Stock"));
+    QCOMPARE(result.metadata.interval, QStringLiteral("5min"));
 }
 
 void CsvBarLoaderTests::appliesTwelveDataTimezone() {
@@ -278,16 +304,19 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
         QStringLiteral("5m"),
         QStringLiteral("Yahoo Finance"),
         bars));
-    bridge.setIndicator({
+    bridge.setIndicators({{
         .kind = tvchart::IndicatorKind::SimpleMovingAverage,
+        .spec = tvchart::defaultIndicatorSpec(
+            tvchart::IndicatorKind::SimpleMovingAverage),
+        .label = "SMA (20)",
         .primary = {{
             .timestamp = 1'700'000'000,
             .value = 101.5,
         }},
-    });
+    }});
 
     QSignalSpy seriesSpy(&bridge, &tvchart::ChartBridge::seriesChanged);
-    QSignalSpy indicatorSpy(&bridge, &tvchart::ChartBridge::indicatorChanged);
+    QSignalSpy indicatorSpy(&bridge, &tvchart::ChartBridge::indicatorsChanged);
     QSignalSpy readySpy(&bridge, &tvchart::ChartBridge::ready);
 
     bridge.webReady();
@@ -300,7 +329,9 @@ void CsvBarLoaderTests::chartBridgeRepublishesStateAfterWebReload() {
     QCOMPARE(firstArguments.at(2).toString(), QStringLiteral("Yahoo Finance"));
     QCOMPARE(firstArguments.at(3).toJsonArray().size(), 1);
     const auto indicatorArguments = indicatorSpy.takeFirst();
-    const auto indicator = indicatorArguments.at(0).toJsonObject();
+    const auto indicators = indicatorArguments.at(0).toJsonArray();
+    QCOMPARE(indicators.size(), 1);
+    const auto indicator = indicators.at(0).toObject();
     QCOMPARE(indicator.value(QStringLiteral("kind")).toString(), QStringLiteral("sma"));
     QCOMPARE(
         indicator.value(QStringLiteral("primary")).toArray().size(),

@@ -47,10 +47,24 @@ void ChartBridge::setChartStyle(QString style) {
     }
 }
 
-void ChartBridge::setIndicator(IndicatorCalculation calculation) {
-    indicator_ = std::move(calculation);
+void ChartBridge::setPriceScaleMode(QString mode) {
+    if (mode != QStringLiteral("normal") &&
+        mode != QStringLiteral("logarithmic") &&
+        mode != QStringLiteral("percentage")) {
+        emit errorReported(QStringLiteral("Unsupported price scale mode: %1").arg(mode));
+        return;
+    }
+    priceScaleMode_ = std::move(mode);
     if (ready_) {
-        emit indicatorChanged(toJson(indicator_));
+        emit priceScaleModeChanged(priceScaleMode_);
+    }
+}
+
+void ChartBridge::setIndicators(
+    std::vector<IndicatorCalculation> calculations) {
+    indicators_ = std::move(calculations);
+    if (ready_) {
+        emit indicatorsChanged(toJson(indicators_));
     }
 }
 
@@ -80,10 +94,11 @@ void ChartBridge::reportError(const QString& message) {
 void ChartBridge::publishState() {
     emit themeChanged(dark_);
     emit chartStyleChanged(style_);
+    emit priceScaleModeChanged(priceScaleMode_);
     if (!bars_.empty()) {
         emit seriesChanged(symbol_, timeframe_, source_, toJson(bars_));
     }
-    emit indicatorChanged(toJson(indicator_));
+    emit indicatorsChanged(toJson(indicators_));
 }
 
 QJsonArray ChartBridge::toJson(const Bars& bars) {
@@ -101,10 +116,18 @@ QJsonArray ChartBridge::toJson(const Bars& bars) {
     return output;
 }
 
-QJsonObject ChartBridge::toJson(
+QJsonArray ChartBridge::toJson(
+    const std::vector<IndicatorCalculation>& calculations) {
+    QJsonArray output;
+    for (const auto& calculation : calculations) {
+        output.append(indicatorToJson(calculation));
+    }
+    return output;
+}
+
+QJsonObject ChartBridge::indicatorToJson(
     const IndicatorCalculation& calculation) {
     const auto kindId = indicatorId(calculation.kind);
-    const auto label = indicatorLabel(calculation.kind);
     const auto pointsToJson = [](const std::vector<IndicatorPoint>& points) {
         QJsonArray output;
         for (const auto& point : points) {
@@ -125,10 +148,12 @@ QJsonObject ChartBridge::toJson(
         },
         {
             QStringLiteral("label"),
-            QString::fromLatin1(
-                label.data(),
-                static_cast<qsizetype>(label.size())),
+            QString::fromStdString(calculation.label),
         },
+        {QStringLiteral("period"), static_cast<int>(calculation.spec.period)},
+        {QStringLiteral("fastPeriod"), static_cast<int>(calculation.spec.fastPeriod)},
+        {QStringLiteral("slowPeriod"), static_cast<int>(calculation.spec.slowPeriod)},
+        {QStringLiteral("signalPeriod"), static_cast<int>(calculation.spec.signalPeriod)},
         {QStringLiteral("primary"), pointsToJson(calculation.primary)},
         {QStringLiteral("secondary"), pointsToJson(calculation.secondary)},
         {QStringLiteral("histogram"), pointsToJson(calculation.histogram)},

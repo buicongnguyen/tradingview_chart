@@ -1,5 +1,6 @@
 #pragma once
 
+#include "data/market_data_parser.hpp"
 #include "domain/bar.hpp"
 
 #include <QNetworkReply>
@@ -17,6 +18,7 @@ namespace tvchart {
 struct MarketDataResult {
     Bars bars;
     QString source;
+    MarketDataMetadata metadata;
     QString error;
 
     [[nodiscard]] bool ok() const noexcept {

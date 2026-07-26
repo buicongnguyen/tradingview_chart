@@ -11,6 +11,7 @@ test("embedded page has no runtime CDN dependency", async () => {
   assert.match(html, /connect-src 'none'/);
   assert.match(html, /vendor\/lightweight-charts\.standalone\.production\.js/);
   assert.match(html, /id="indicator"/);
+  assert.match(html, /id="crosshair-details"/);
 });
 
 test("renderer keeps attribution and receives application data", async () => {
@@ -19,7 +20,13 @@ test("renderer keeps attribution and receives application data", async () => {
   assert.match(source, /attributionLogo:\s*true/);
   assert.match(source, /priceSeries\.setData/);
   assert.match(source, /bridge\.seriesChanged\.connect/);
-  assert.match(source, /bridge\.indicatorChanged\.connect/);
+  assert.match(source, /bridge\.indicatorsChanged\.connect/);
+  assert.match(source, /bridge\.priceScaleModeChanged\.connect/);
+  assert.match(source, /chart\.subscribeCrosshairMove/);
+  assert.match(source, /volumeRatio/);
+  assert.match(source, /PriceScaleMode\.Logarithmic/);
+  assert.match(source, /rolling-high/);
+  assert.match(source, /volume-sma/);
   assert.match(source, /LightweightCharts\.LineSeries/);
   assert.match(source, /LightweightCharts\.HistogramSeries/);
   assert.match(source, /chart\.removePane/);

@@ -6,6 +6,9 @@
 /.vs/
 /.vscode/
 /CMakeUserPresets.json
+.env
+.env.*
+!.env.example
 *.user
 *.log
 *.zip

@@ -19,7 +19,8 @@ public:
     bool setSeries(QString symbol, QString timeframe, QString source, Bars bars);
     void setDarkTheme(bool dark);
     void setChartStyle(QString style);
-    void setIndicator(IndicatorCalculation calculation);
+    void setPriceScaleMode(QString mode);
+    void setIndicators(std::vector<IndicatorCalculation> calculations);
     void requestFit();
 
     [[nodiscard]] bool isReady() const noexcept;
@@ -35,7 +36,8 @@ signals:
         const QJsonArray& bars);
     void themeChanged(bool dark);
     void chartStyleChanged(const QString& style);
-    void indicatorChanged(const QJsonObject& calculation);
+    void priceScaleModeChanged(const QString& mode);
+    void indicatorsChanged(const QJsonArray& calculations);
     void fitRequested();
     void ready();
     void errorReported(const QString& message);
@@ -43,15 +45,18 @@ signals:
 private:
     void publishState();
     [[nodiscard]] static QJsonArray toJson(const Bars& bars);
-    [[nodiscard]] static QJsonObject toJson(
+    [[nodiscard]] static QJsonArray toJson(
+        const std::vector<IndicatorCalculation>& calculations);
+    [[nodiscard]] static QJsonObject indicatorToJson(
         const IndicatorCalculation& calculation);
 
     QString symbol_;
     QString timeframe_;
     QString source_;
     QString style_{QStringLiteral("candlestick")};
+    QString priceScaleMode_{QStringLiteral("normal")};
     Bars bars_;
-    IndicatorCalculation indicator_;
+    std::vector<IndicatorCalculation> indicators_;
     bool dark_{true};
     bool ready_{false};
 };

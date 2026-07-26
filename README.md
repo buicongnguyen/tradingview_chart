@@ -12,22 +12,44 @@ demo data. Local OHLCV CSV import remains available.
 Lightweight Charts is only the renderer. Provider availability, freshness,
 rate limits, terms, and market-data display rights still apply.
 
-## MVP features
+## Version 0.3 features
 
 - Qt Widgets desktop shell with an embedded, local Qt WebEngine chart.
 - Candlestick, line, and area display modes.
-- Volume overlay, crosshair, pan, zoom, fit-to-data, and light/dark themes.
-- Locally calculated SMA (20), EMA (20), UTC-session VWAP, RSI (14), and
-  MACD (12, 26, 9), including oscillator panes and explicit warm-up behavior.
+- Linear, logarithmic, and percentage price scales.
+- Volume overlay, pan, zoom, fit-to-data, and light/dark themes.
+- A crosshair information strip with UTC timestamp, OHLCV, candle change,
+  candle range, volume relative to its 20-bar average, and indicator values.
+- Several simultaneous, configurable local indicators: SMA, EMA,
+  UTC-session VWAP, RSI, MACD, rolling high, rolling low, and Volume SMA.
+  Oscillators receive independent panes and warm-up remains explicit.
 - A calculated-information panel with latest close, last-bar change, loaded
-  high/low range, range position, average volume (20), and current indicator
+  high/low range, range position, average volume (20), and all enabled indicator
   values.
+- A data-status panel that distinguishes polled REST data, local CSV data, and
+  synthetic demo data; it also displays provider-reported delay, retrieval time,
+  last candle age, market metadata, and bar count.
+- Persistent named watchlists with add/remove, local notes, manual/ticker sort,
+  reorder, and CSV import/export.
+- A provenance-aware research workspace with an event calendar, provider
+  company overview, provider aggregate target/rating counts, and separately
+  calculated organization-level target summaries.
+- Manual organization-target and event entry with local persistence; target
+  CSV import/export retains organization, date, currency, rating, and source
+  URL.
+- Optional, explicit Alpha Vantage overview and earnings-calendar refresh
+  through `ALPHA_VANTAGE_API_KEY`. Research requests are never made
+  automatically.
+- A long-only margin-maintenance scenario calculator showing current and
+  stressed equity, requirement, cushion, and the calculated market-value
+  threshold. It does not claim to predict a margin-call date.
 - Yahoo Finance chart data as the default online source.
 - Optional Twelve Data REST fallback configured through an environment variable.
 - Deterministic offline demo data for a small watchlist and five timeframes.
 - Local CSV import with validation and clear error messages.
-- Settings persistence for window geometry, chart mode, theme, symbol, and
-  timeframe.
+- Settings persistence for window geometry, chart mode, theme, price scale,
+  symbol, timeframe, indicator parameters, named watchlists, research records,
+  and margin scenario assumptions.
 - No runtime CDN, broker connection, or application backend.
 - C++ unit tests plus a Qt WebEngine startup smoke mode.
 
@@ -37,8 +59,15 @@ rate limits, terms, and market-data display rights still apply.
 
 Yahoo Finance is the default because its chart endpoint does not require a key.
 The endpoint is unofficial and unsupported, so it can be rate-limited, changed,
-or withdrawn without notice. The application labels Yahoo data explicitly and
-falls back safely when a request fails.
+or withdrawn without notice. The application labels Yahoo data explicitly,
+describes it as polled rather than streaming, reports delay as unknown unless
+the response supplies it, and falls back safely when a request fails.
+
+This endpoint is not a documented public market-data API. Use it only where
+your access is permitted by the current
+[Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html).
+For commercial distribution or a service used by third parties, disable or
+replace this provider with a source whose agreement explicitly covers that use.
 
 ### Twelve Data fallback
 
@@ -46,7 +75,7 @@ Create a Twelve Data key and set it before starting the application:
 
 ```powershell
 $env:TWELVE_DATA_API_KEY = 'your-key'
-.\dist\TradingViewChart-0.1.0-win64\tradingview_chart.exe
+.\dist\TradingViewChart-0.3.0-win64\tradingview_chart.exe
 ```
 
 The key is read from the process environment and is never written to settings,
@@ -58,6 +87,29 @@ The free plan may restrict display or redistribution. Review the current
 [Twelve Data pricing and usage terms](https://twelvedata.com/pricing) before
 using its data outside personal evaluation.
 
+### Alpha Vantage research (optional)
+
+Set a key before starting the application, then use the **Research** dock's
+**Summary** tab and choose **Refresh Alpha Vantage research**:
+
+```powershell
+$env:ALPHA_VANTAGE_API_KEY = 'your-key'
+.\dist\TradingViewChart-0.3.0-win64\tradingview_chart.exe
+```
+
+The refresh retrieves the selected company's overview followed by its earnings
+calendar. It is deliberately manual to conserve provider quotas. Provider
+availability, endpoint entitlement, request limits, and field coverage depend
+on the account and can change. A failed calendar request keeps a valid company
+overview and reports the calendar warning.
+
+The provider's `AnalystTargetPrice` is labeled as an aggregate and is never
+mixed into the locally recorded organization-level target calculation.
+Organization summaries use only the latest dated target for each organization
+within a currency; they never combine currencies. Earnings-calendar dates are
+labeled **Estimated**, while every event retains its source and retrieval time.
+The API key is read from the process environment and is not persisted.
+
 ### Offline behavior
 
 Choose **File → Load offline demo** to avoid network requests. CSV data remains
@@ -66,14 +118,68 @@ and retries later.
 
 ## Technical calculations
 
-The indicator engine consumes the same validated bars shown on the chart. SMA
-and EMA use closing prices. VWAP uses typical price `(high + low + close) / 3`,
-weighted by volume, and resets at each UTC-day boundary. RSI uses Wilder
-smoothing, and MACD uses 12/26-period EMAs with a 9-period signal EMA.
+The indicator engine consumes the same validated bars shown on the chart. SMA,
+EMA, rolling high/low, Volume SMA, and RSI accept periods from 1 to 500. VWAP
+uses typical price `(high + low + close) / 3`, weighted by volume, and resets at
+each UTC-day boundary. MACD exposes configurable fast, slow, and signal periods
+and requires the slow period to be greater than the fast period.
 
 Warm-up values are omitted until the required number of bars exists. All
 calculations are descriptive views of historical input; they are not price
 forecasts, trading recommendations, or guarantees of future results.
+
+## Research and margin assumptions
+
+Organization target records require a symbol, organization, positive target,
+currency, and publication date. A source URL and rating are optional. The
+application calculates mean, median, and range per currency from the latest
+record for each organization. It does not manufacture analyst estimates.
+
+The margin panel models a long-only account with one uniform maintenance rate:
+
+```text
+equity = long market value + other equity - margin debit
+requirement = long market value × maintenance rate
+call threshold = (margin debit - other equity) / (1 - maintenance rate)
+```
+
+Real brokers can apply security-specific and concentrated-position house
+requirements, change requirements without a calendar event, and liquidate
+under their own agreements. Therefore the panel is a transparent stress
+scenario, not a broker feed, legal notice, or prediction of a “margin-call
+day.”
+
+SEC EDGAR and FRED are not treated as analyst-target sources. A future
+integration can use EDGAR for issuer filings and FRED for macroeconomic release
+data once issuer mapping, series selection, release calendars, provenance, and
+provider quotas are modeled explicitly.
+
+## Watchlist CSV format
+
+Use **File → Export active watchlist CSV** to create the canonical format:
+
+```text
+symbol,note
+"AAPL","Large, liquid"
+"BRK-B","Review after earnings"
+```
+
+Import merges valid, previously absent symbols into the active named list.
+Symbols are normalized to uppercase. Duplicate or malformed rows are reported
+and skipped. Watchlists and their notes are stored locally with `QSettings`;
+they are not transmitted to Yahoo or Twelve Data.
+
+## Organization target CSV format
+
+The Research Targets tab imports and exports:
+
+```text
+symbol,organization,target,currency,published_date,rating,source_url
+"AAPL","Example Research",250,USD,2026-07-20,"Buy","https://example.com/report"
+```
+
+Invalid rows are skipped and reported. Re-importing the same
+symbol/organization/currency/date is treated as a duplicate.
 
 ## Data boundary
 
@@ -85,8 +191,10 @@ data rights. This repository deliberately separates:
 2. online acquisition and provider-specific JSON parsing;
 3. offline sources (`DemoDataSource` and `CsvBarLoader`);
 4. provider-independent technical calculations and summary statistics;
-5. the Qt/WebChannel bridge; and
-6. the JavaScript chart renderer.
+5. research/event/target contracts and the margin scenario engine;
+6. optional research acquisition and provider-specific parsers;
+7. the Qt/WebChannel bridge; and
+8. the JavaScript chart renderer.
 
 ## Prerequisites
 

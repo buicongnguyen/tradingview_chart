@@ -170,6 +170,7 @@ MarketDataParseResult MarketDataParser::parseYahoo(const QByteArray& payload) {
         return {.error = QStringLiteral("Yahoo Finance returned no chart result.")};
     }
     const auto result = results.at(0).toObject();
+    const auto meta = result.value(QStringLiteral("meta")).toObject();
     const auto timestamps = result.value(QStringLiteral("timestamp")).toArray();
     const auto quotes =
         result.value(QStringLiteral("indicators"))
@@ -197,7 +198,28 @@ MarketDataParseResult MarketDataParser::parseYahoo(const QByteArray& payload) {
             bars.push_back(*bar);
         }
     }
-    return finish(std::move(bars), QStringLiteral("Yahoo Finance"));
+    auto parsed = finish(std::move(bars), QStringLiteral("Yahoo Finance"));
+    if (!parsed.ok()) {
+        return parsed;
+    }
+    parsed.metadata.exchange =
+        meta.value(QStringLiteral("fullExchangeName")).toString(
+            meta.value(QStringLiteral("exchangeName")).toString());
+    parsed.metadata.currency =
+        meta.value(QStringLiteral("currency")).toString();
+    parsed.metadata.timezone =
+        meta.value(QStringLiteral("exchangeTimezoneName")).toString();
+    parsed.metadata.instrumentType =
+        meta.value(QStringLiteral("instrumentType")).toString();
+    parsed.metadata.interval =
+        meta.value(QStringLiteral("dataGranularity")).toString();
+    const auto delay = finiteNumber(
+        meta.value(QStringLiteral("exchangeDataDelayedBy")));
+    if (delay && *delay >= 0.0 && *delay <= 24.0 * 60.0 &&
+        std::trunc(*delay) == *delay) {
+        parsed.metadata.exchangeDelayMinutes = static_cast<int>(*delay);
+    }
+    return parsed;
 }
 
 MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payload) {
@@ -278,7 +300,23 @@ MarketDataParseResult MarketDataParser::parseTwelveData(const QByteArray& payloa
             bars.push_back(bar);
         }
     }
-    return finish(std::move(bars), QStringLiteral("Twelve Data"));
+    auto parsed = finish(std::move(bars), QStringLiteral("Twelve Data"));
+    if (!parsed.ok()) {
+        return parsed;
+    }
+    const auto meta = root.value(QStringLiteral("meta")).toObject();
+    parsed.metadata.exchange =
+        meta.value(QStringLiteral("exchange")).toString();
+    parsed.metadata.currency =
+        meta.value(QStringLiteral("currency")).toString();
+    parsed.metadata.timezone =
+        meta.value(QStringLiteral("exchange_timezone")).toString(
+            meta.value(QStringLiteral("timezone")).toString());
+    parsed.metadata.instrumentType =
+        meta.value(QStringLiteral("type")).toString();
+    parsed.metadata.interval =
+        meta.value(QStringLiteral("interval")).toString();
+    return parsed;
 }
 
 } // namespace tvchart

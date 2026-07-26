@@ -1,7 +1,8 @@
 # Detailed implementation plan
 
 Status: original offline MVP completed on 2026-07-24; reviewed online-provider
-extension implemented on 2026-07-25.
+extension implemented on 2026-07-25; data-intelligence workstation package
+implemented on 2026-07-26.
 
 ## 1. Goal and non-goals
 
@@ -58,12 +59,14 @@ library in `QWebEngineView`, package all web assets locally, and use
 
 ```text
 Qt MainWindow
-  ├── Watchlist / timeframe / style / theme controls
+  ├── Named watchlists / timeframe / style / scale / theme controls
+  ├── Configurable multi-indicator and data-status docks
   ├── MarketDataClient
   │     ├── Yahoo Finance (primary)
   │     └── Twelve Data (optional fallback)
   ├── DemoDataSource ─┐
   ├── CsvBarLoader ───┼── std::vector<Bar>
+  ├── TechnicalIndicators / WatchlistWorkspace
   └── ChartView
         ├── ChartBridge (QWebChannel)
         └── local index.html + chart.js
@@ -82,6 +85,10 @@ Qt MainWindow
   values without coupling provider schemas to the renderer.
 - `MarketDataClient`: asynchronous HTTPS requests, cancellation, request
   timeouts, Yahoo-first fallback sequencing, and environment-only credentials.
+- `TechnicalIndicators`: validated configurable SMA, EMA, VWAP, RSI, MACD,
+  rolling high/low, and Volume SMA calculations over the displayed bars.
+- `WatchlistWorkspace`: validated named lists, local notes, JSON persistence,
+  deterministic sorting, and quoted CSV import/export.
 
 ### Qt bridge and presentation
 
@@ -100,6 +107,9 @@ Qt MainWindow
 - Keep TradingView's `attributionLogo` enabled.
 - Render price plus volume.
 - Support candlestick, line, and area modes without reloading the page.
+- Support Linear, Log, and Percent modes without reloading the page.
+- Render multiple overlays and independent oscillator panes.
+- Present safe text-only crosshair OHLCV, relative-volume, and indicator details.
 - Preserve pan/zoom for incremental presentation changes; fit only on explicit
   load/reset.
 - Escape all text rendered into HTML and accept data only through WebChannel.
@@ -166,20 +176,50 @@ Gate: provider parser fixtures pass, `--market-data-smoke-test` retrieves and
 validates AAPL from Yahoo, normal WebEngine smoke remains network-independent,
 and provider failure leaves the application usable with demo data.
 
+### Phase 7 — data-intelligence workstation
+
+Deliver a crosshair information strip, provider/freshness status, three price
+scale modes, persistent editable named watchlists with CSV exchange, rolling
+high/low and Volume SMA, and configurable simultaneous indicators.
+
+Gate: calculation and watchlist tests pass; the WebEngine smoke test exercises
+several indicator panes and Log/Percent scales; polled, local, and synthetic
+sources remain visibly distinct; and the deployable Windows package passes its
+isolated runtime smoke test.
+
+### Phase 8 — provenance-aware research and margin risk
+
+Deliver normalized company snapshots, dated organization targets, source- and
+confidence-aware research events, local persistence, target CSV exchange,
+optional manual Alpha Vantage overview/earnings refresh, and a transparent
+long-only margin-maintenance stress calculator.
+
+Gate: organization consensus uses only the latest target per organization and
+never mixes currencies or provider aggregates; parser, persistence, CSV, and
+margin formula tests pass; provider calendar failure preserves a valid
+overview; the UI never describes an estimated earnings date as confirmed or a
+calculated margin threshold as a future margin-call date.
+
 ## 5. Follow-on roadmap
 
 After the MVP is stable:
 
-1. Add SQLite history/workspace persistence.
+1. Add an explicit provider-permission-aware offline historical cache.
 2. Generalize the implemented `MarketDataClient` behind `IMarketDataSource`
    when a third provider or streaming transport is added.
 3. Reassess provider licensing, redistribution, authentication, and retention
    rules before public or commercial distribution.
 4. Add incremental `update()` streaming, gap detection, reconnect, and bounded
    memory.
-5. Add indicators as separate series/panes (SMA, EMA, VWAP, RSI, MACD).
-6. Add drawing tools and layout persistence.
-7. Add paper trading only after quote freshness and audit requirements are
+5. Add drawing tools, undo/redo, and named chart-layout persistence.
+6. Add explainable local alerts only after durable rule/audit persistence.
+7. Add SEC EDGAR filing events and curated FRED release series only after
+   issuer mapping, release calendars, update policy, and provenance are
+   explicit; neither source supplies analyst price targets.
+8. Add historical percent-return backtests and multi-symbol screening only
+   after dataset provenance, adjusted-price policy, and provider quotas are
+   explicit.
+9. Add paper trading only after quote freshness and audit requirements are
    defined.
 
 ## 6. Risks and mitigations
@@ -207,4 +247,9 @@ and build, pass unit tests, complete the network-independent WebEngine smoke
 test, retrieve the active symbol from Yahoo, use Twelve Data when configured,
 fall back offline, import and validate CSV data, switch
 timeframe/style/theme, show TradingView attribution, package on Windows, and run
-without Alpaca credentials or an application-owned backend.
+without Alpaca credentials or an application-owned backend. Version 0.3 also
+requires persistent named watchlists, conservative source/freshness labels,
+crosshair details, configurable multi-indicators, Linear/Log/Percent scale
+switching, provenance-aware research records, latest-per-organization target
+summaries, an explicitly estimated event calendar, and a transparent
+margin-maintenance scenario.

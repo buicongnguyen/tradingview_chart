@@ -7,13 +7,17 @@
   const timeframeLabel = document.getElementById("timeframe");
   const indicatorLabel = document.getElementById("indicator");
   const sourceLabel = document.getElementById("source");
+  const crosshairDetails = document.getElementById("crosshair-details");
 
   let bridge = null;
   let dark = true;
   let style = "candlestick";
+  let priceScaleMode = "normal";
   let bars = [];
   let priceSeries = null;
   let indicatorSeries = [];
+  let indicatorCalculations = [];
+  let barIndexByTime = new Map();
 
   const colors = () => dark
     ? {
@@ -119,7 +123,29 @@
         borderVisible: false,
       });
     }
+    applyPriceScaleMode();
     setSeriesData();
+  }
+
+  function applyPriceScaleMode() {
+    if (priceSeries === null) {
+      return;
+    }
+    const modes = {
+      normal: LightweightCharts.PriceScaleMode.Normal,
+      logarithmic: LightweightCharts.PriceScaleMode.Logarithmic,
+      percentage: LightweightCharts.PriceScaleMode.Percentage,
+    };
+    priceSeries.priceScale().applyOptions({ mode: modes[priceScaleMode] });
+  }
+
+  function setPriceScaleMode(value) {
+    const nextMode = String(value);
+    if (!["normal", "logarithmic", "percentage"].includes(nextMode)) {
+      throw new Error(`Unsupported price scale mode: ${nextMode}`);
+    }
+    priceScaleMode = nextMode;
+    applyPriceScaleMode();
   }
 
   function normalizeBar(bar) {
@@ -223,109 +249,217 @@
     }));
   }
 
-  function setIndicator(calculation) {
+  function calculationPoints(values) {
+    return indicatorPoints(values);
+  }
+
+  function setIndicators(values) {
     clearIndicatorSeries();
-    const kind = String(calculation?.kind ?? "none");
-    const label = String(calculation?.label ?? "None");
-    const primary = indicatorPoints(calculation?.primary);
-    const secondary = indicatorPoints(calculation?.secondary);
-    const histogram = indicatorPoints(calculation?.histogram);
-    indicatorLabel.textContent =
-      kind !== "none" && primary.length === 0
-        ? `${label} · warming up`
-        : label;
+    indicatorCalculations = Array.from(values ?? [], (calculation) => ({
+      kind: String(calculation?.kind ?? "none"),
+      label: String(calculation?.label ?? "None"),
+      primary: calculationPoints(calculation?.primary),
+      secondary: calculationPoints(calculation?.secondary),
+      histogram: calculationPoints(calculation?.histogram),
+    }));
 
-    if (kind === "none" || primary.length === 0) {
-      return;
-    }
+    indicatorLabel.textContent = indicatorCalculations.length === 0
+      ? "No indicators"
+      : indicatorCalculations.map((calculation) =>
+          calculation.primary.length === 0
+            ? `${calculation.label} · warming`
+            : calculation.label).join(" · ");
 
-    if (["sma", "ema", "vwap"].includes(kind)) {
-      const color = kind === "sma"
-        ? "#ff9800"
-        : kind === "ema"
-          ? "#ab47bc"
-          : "#00acc1";
-      const overlay = chart.addSeries(LightweightCharts.LineSeries, {
-        color,
-        lineWidth: 2,
-        lastValueVisible: true,
-        priceLineVisible: false,
-        crosshairMarkerVisible: true,
-      });
-      overlay.setData(primary);
-      indicatorSeries.push(overlay);
-      return;
-    }
+    let nextPane = 1;
+    for (const calculation of indicatorCalculations) {
+      const { kind, primary, secondary, histogram } = calculation;
+      if (kind === "none" || primary.length === 0) {
+        continue;
+      }
 
-    if (kind === "rsi") {
-      const rsi = chart.addSeries(LightweightCharts.LineSeries, {
-        color: "#7e57c2",
-        lineWidth: 2,
-        lastValueVisible: true,
-        priceLineVisible: false,
-      }, 1);
-      rsi.setData(primary);
-      rsi.createPriceLine({
-        price: 70,
-        color: "#ef535088",
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        lineWidth: 1,
-        axisLabelVisible: true,
-        title: "70",
-      });
-      rsi.createPriceLine({
-        price: 30,
-        color: "#26a69a88",
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        lineWidth: 1,
-        axisLabelVisible: true,
-        title: "30",
-      });
-      indicatorSeries.push(rsi);
-    } else if (kind === "macd") {
-      const histogramSeries = chart.addSeries(
-        LightweightCharts.HistogramSeries,
-        {
-          base: 0,
+      if (["sma", "ema", "vwap", "rolling-high", "rolling-low"].includes(kind)) {
+        const colorsByKind = {
+          sma: "#ff9800",
+          ema: "#ab47bc",
+          vwap: "#00acc1",
+          "rolling-high": "#ef5350",
+          "rolling-low": "#26a69a",
+        };
+        const overlay = chart.addSeries(LightweightCharts.LineSeries, {
+          color: colorsByKind[kind],
+          lineWidth: kind.startsWith("rolling-") ? 1 : 2,
+          lineStyle: kind.startsWith("rolling-")
+            ? LightweightCharts.LineStyle.Dashed
+            : LightweightCharts.LineStyle.Solid,
+          lastValueVisible: true,
+          priceLineVisible: false,
+          crosshairMarkerVisible: true,
+        });
+        overlay.setData(primary);
+        indicatorSeries.push(overlay);
+        continue;
+      }
+
+      if (kind === "volume-sma") {
+        const volumeAverage = chart.addSeries(LightweightCharts.LineSeries, {
+          color: "#90a4ae",
+          lineWidth: 2,
           lastValueVisible: false,
           priceLineVisible: false,
-        },
-        1,
-      );
-      histogramSeries.setData(histogram.map((point) => ({
-        ...point,
-        color: point.value >= 0 ? "#26a69a99" : "#ef535099",
-      })));
-      histogramSeries.createPriceLine({
-        price: 0,
-        color: "#787b8688",
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        lineWidth: 1,
-        axisLabelVisible: false,
-      });
+          priceScaleId: "volume",
+        });
+        volumeAverage.setData(primary);
+        indicatorSeries.push(volumeAverage);
+        continue;
+      }
 
-      const macd = chart.addSeries(LightweightCharts.LineSeries, {
-        color: "#ffc107",
-        lineWidth: 2,
-        lastValueVisible: true,
-        priceLineVisible: false,
-      }, 1);
-      macd.setData(primary);
-      const signal = chart.addSeries(LightweightCharts.LineSeries, {
-        color: "#42a5f5",
-        lineWidth: 2,
-        lastValueVisible: true,
-        priceLineVisible: false,
-      }, 1);
-      signal.setData(secondary);
-      indicatorSeries.push(histogramSeries, macd, signal);
+      const pane = nextPane++;
+      if (kind === "rsi") {
+        const rsi = chart.addSeries(LightweightCharts.LineSeries, {
+          color: "#7e57c2",
+          lineWidth: 2,
+          lastValueVisible: true,
+          priceLineVisible: false,
+        }, pane);
+        rsi.setData(primary);
+        rsi.createPriceLine({
+          price: 70,
+          color: "#ef535088",
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          lineWidth: 1,
+          axisLabelVisible: true,
+          title: "70",
+        });
+        rsi.createPriceLine({
+          price: 30,
+          color: "#26a69a88",
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          lineWidth: 1,
+          axisLabelVisible: true,
+          title: "30",
+        });
+        indicatorSeries.push(rsi);
+      } else if (kind === "macd") {
+        const histogramSeries = chart.addSeries(
+          LightweightCharts.HistogramSeries,
+          {
+            base: 0,
+            lastValueVisible: false,
+            priceLineVisible: false,
+          },
+          pane,
+        );
+        histogramSeries.setData(histogram.map((point) => ({
+          ...point,
+          color: point.value >= 0 ? "#26a69a99" : "#ef535099",
+        })));
+        histogramSeries.createPriceLine({
+          price: 0,
+          color: "#787b8688",
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          lineWidth: 1,
+          axisLabelVisible: false,
+        });
+
+        const macd = chart.addSeries(LightweightCharts.LineSeries, {
+          color: "#ffc107",
+          lineWidth: 2,
+          lastValueVisible: true,
+          priceLineVisible: false,
+        }, pane);
+        macd.setData(primary);
+        const signal = chart.addSeries(LightweightCharts.LineSeries, {
+          color: "#42a5f5",
+          lineWidth: 2,
+          lastValueVisible: true,
+          priceLineVisible: false,
+        }, pane);
+        signal.setData(secondary);
+        indicatorSeries.push(histogramSeries, macd, signal);
+      }
     }
 
     const panes = chart.panes();
     if (panes.length > 1) {
-      panes[0].setStretchFactor(3);
-      panes[1].setStretchFactor(1);
+      panes[0].setStretchFactor(4);
+      for (let index = 1; index < panes.length; ++index) {
+        panes[index].setStretchFactor(1);
+      }
     }
+    updateCrosshairDetails(bars.at(-1)?.time);
+  }
+
+  const formatPrice = (value) => {
+    const number = Number(value);
+    const decimals = Math.abs(number) < 1 ? 4 : 2;
+    return Number.isFinite(number)
+      ? number.toLocaleString(undefined, {
+          minimumFractionDigits: decimals,
+          maximumFractionDigits: decimals,
+        })
+      : "—";
+  };
+
+  const formatVolume = (value) => Number(value).toLocaleString(undefined, {
+    maximumFractionDigits: 0,
+  });
+
+  function pointValue(points, time) {
+    const point = points.find((candidate) => candidate.time === time);
+    return point?.value;
+  }
+
+  function updateCrosshairDetails(time) {
+    const index = barIndexByTime.get(Number(time));
+    if (index === undefined) {
+      crosshairDetails.textContent =
+        "Move the crosshair over a candle to inspect OHLCV and calculations.";
+      return;
+    }
+    const bar = bars[index];
+    const previousClose = index > 0 ? bars[index - 1].close : bar.open;
+    const change = bar.close - previousClose;
+    const changePercent = previousClose > 0
+      ? change * 100 / previousClose
+      : 0;
+    const firstVolumeIndex = Math.max(0, index - 19);
+    const volumeWindow = bars.slice(firstVolumeIndex, index + 1);
+    const averageVolume = volumeWindow.reduce(
+      (total, candidate) => total + candidate.volume,
+      0,
+    ) / volumeWindow.length;
+    const volumeRatio = averageVolume > 0 ? bar.volume / averageVolume : 0;
+    const date = new Date(bar.time * 1000);
+    const details = [
+      date.toISOString().replace(".000Z", "Z"),
+      `O ${formatPrice(bar.open)}`,
+      `H ${formatPrice(bar.high)}`,
+      `L ${formatPrice(bar.low)}`,
+      `C ${formatPrice(bar.close)}`,
+      `Δ ${change >= 0 ? "+" : ""}${formatPrice(change)} (${changePercent >= 0 ? "+" : ""}${changePercent.toFixed(2)}%)`,
+      `Range ${formatPrice(bar.high - bar.low)}`,
+      `Vol ${formatVolume(bar.volume)} (${volumeRatio.toFixed(2)}× avg20)`,
+    ];
+    for (const calculation of indicatorCalculations) {
+      const primary = pointValue(calculation.primary, bar.time);
+      if (primary === undefined) {
+        continue;
+      }
+      if (calculation.kind === "macd") {
+        const signal = pointValue(calculation.secondary, bar.time);
+        const histogram = pointValue(calculation.histogram, bar.time);
+        details.push(
+          `${calculation.label}: ${formatPrice(primary)}` +
+          `${signal === undefined ? "" : ` / ${formatPrice(signal)}`}` +
+          `${histogram === undefined ? "" : ` / H ${formatPrice(histogram)}`}`,
+        );
+      } else if (calculation.kind === "volume-sma") {
+        details.push(`${calculation.label}: ${formatVolume(primary)}`);
+      } else {
+        details.push(`${calculation.label}: ${formatPrice(primary)}`);
+      }
+    }
+    crosshairDetails.textContent = details.join("  ·  ");
   }
 
   function setBars(symbol, timeframe, source, values) {
@@ -341,6 +475,9 @@
       timeframeLabel.textContent !== String(timeframe) ||
       !rangesOverlap;
     bars = nextBars;
+    barIndexByTime = new Map(
+      bars.map((bar, index) => [bar.time, index]),
+    );
     symbolLabel.textContent = String(symbol);
     timeframeLabel.textContent = String(timeframe);
     sourceLabel.textContent = String(source);
@@ -348,8 +485,13 @@
     if (shouldFit) {
       chart.timeScale().fitContent();
     }
+    updateCrosshairDetails(bars.at(-1)?.time);
     loading.hidden = true;
   }
+
+  chart.subscribeCrosshairMove((parameter) => {
+    updateCrosshairDetails(parameter.time ?? bars.at(-1)?.time);
+  });
 
   function reportError(error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -392,9 +534,16 @@
           reportError(error);
         }
       });
-      bridge.indicatorChanged.connect((calculation) => {
+      bridge.priceScaleModeChanged.connect((value) => {
         try {
-          setIndicator(calculation);
+          setPriceScaleMode(value);
+        } catch (error) {
+          reportError(error);
+        }
+      });
+      bridge.indicatorsChanged.connect((calculations) => {
+        try {
+          setIndicators(calculations);
         } catch (error) {
           reportError(error);
         }

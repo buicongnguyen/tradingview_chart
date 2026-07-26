@@ -12,6 +12,8 @@ private slots:
     void calculatesMovingAverages();
     void calculatesSessionVwap();
     void calculatesRsiAndMacd();
+    void calculatesRollingAndVolumeInformation();
+    void acceptsConfigurableMultipleIndicators();
     void calculatesMarketStatistics();
     void keepsWarmupExplicit();
     void rejectsInvalidBars();
@@ -118,6 +120,66 @@ void TechnicalIndicatorsTests::calculatesRsiAndMacd() {
             macd.secondary.back().value -
             macd.histogram.back().value) <
         1e-12);
+}
+
+void TechnicalIndicatorsTests::calculatesRollingAndVolumeInformation() {
+    const auto bars = linearBars(25);
+    const tvchart::IndicatorSpec rollingHigh{
+        .kind = tvchart::IndicatorKind::RollingHigh,
+        .period = 5,
+    };
+    const tvchart::IndicatorSpec rollingLow{
+        .kind = tvchart::IndicatorKind::RollingLow,
+        .period = 5,
+    };
+    const tvchart::IndicatorSpec volumeAverage{
+        .kind = tvchart::IndicatorKind::VolumeSimpleMovingAverage,
+        .period = 5,
+    };
+
+    const auto highs = tvchart::calculateIndicator(bars, rollingHigh);
+    const auto lows = tvchart::calculateIndicator(bars, rollingLow);
+    const auto volumes = tvchart::calculateIndicator(bars, volumeAverage);
+    QCOMPARE(highs.primary.size(), std::size_t{21});
+    QCOMPARE(highs.primary.front().value, 5.0);
+    QCOMPARE(highs.primary.back().value, 25.0);
+    QCOMPARE(lows.primary.front().value, 1.0);
+    QCOMPARE(lows.primary.back().value, 21.0);
+    QCOMPARE(volumes.primary.front().value, 3.0);
+    QCOMPARE(volumes.primary.back().value, 23.0);
+}
+
+void TechnicalIndicatorsTests::acceptsConfigurableMultipleIndicators() {
+    const auto bars = linearBars(12);
+    const std::vector<tvchart::IndicatorSpec> specs{
+        {
+            .kind = tvchart::IndicatorKind::SimpleMovingAverage,
+            .period = 3,
+        },
+        {
+            .kind = tvchart::IndicatorKind::ExponentialMovingAverage,
+            .period = 5,
+        },
+    };
+    const auto calculations = tvchart::calculateIndicators(bars, specs);
+    QCOMPARE(calculations.size(), std::size_t{2});
+    QCOMPARE(calculations[0].primary.size(), std::size_t{10});
+    QCOMPARE(calculations[0].primary.front().value, 2.0);
+    QCOMPARE(calculations[0].label, std::string("SMA (3)"));
+    QCOMPARE(calculations[1].primary.size(), std::size_t{8});
+    QCOMPARE(calculations[1].label, std::string("EMA (5)"));
+
+    const tvchart::IndicatorSpec invalidMacd{
+        .kind = tvchart::IndicatorKind::MovingAverageConvergenceDivergence,
+        .fastPeriod = 26,
+        .slowPeriod = 12,
+        .signalPeriod = 9,
+    };
+    QVERIFY(!tvchart::validIndicatorSpec(invalidMacd));
+    QVERIFY_EXCEPTION_THROWN(
+        static_cast<void>(
+            tvchart::calculateIndicator(bars, invalidMacd)),
+        std::invalid_argument);
 }
 
 void TechnicalIndicatorsTests::calculatesMarketStatistics() {

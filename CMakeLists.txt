@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(TradingViewChart VERSION 0.1.0 LANGUAGES CXX)
+project(TradingViewChart VERSION 0.3.0 LANGUAGES CXX)
 
 option(TRADINGVIEW_CHART_BUILD_TESTS "Build the unit test suite" ON)
 
@@ -40,6 +40,14 @@ add_library(tradingview_chart_core
     src/data/demo_data_source.hpp
     src/data/market_data_parser.cpp
     src/data/market_data_parser.hpp
+    src/research/alpha_vantage_research_parser.cpp
+    src/research/alpha_vantage_research_parser.hpp
+    src/research/margin_risk.cpp
+    src/research/margin_risk.hpp
+    src/research/research_models.cpp
+    src/research/research_models.hpp
+    src/watchlists/watchlist_workspace.cpp
+    src/watchlists/watchlist_workspace.hpp
 )
 target_include_directories(tradingview_chart_core PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(tradingview_chart_core PUBLIC Qt6::Core)
@@ -59,6 +67,8 @@ qt_add_executable(tradingview_chart WIN32
     src/chart/chart_view.hpp
     src/data/market_data_client.cpp
     src/data/market_data_client.hpp
+    src/research/alpha_vantage_research_client.cpp
+    src/research/alpha_vantage_research_client.hpp
     resources.qrc
 )
 target_link_libraries(tradingview_chart PRIVATE
@@ -105,9 +115,37 @@ if(TRADINGVIEW_CHART_BUILD_TESTS)
         COMMAND tradingview_chart_indicator_tests
     )
 
+    add_executable(tradingview_chart_watchlist_tests
+        tests/watchlist_workspace_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_watchlist_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_watchlist_tests
+        COMMAND tradingview_chart_watchlist_tests
+    )
+
+    add_executable(tradingview_chart_research_tests
+        tests/research_models_tests.cpp
+    )
+    target_link_libraries(tradingview_chart_research_tests PRIVATE
+        tradingview_chart_core
+        Qt6::Core
+        Qt6::Test
+    )
+    add_test(
+        NAME tradingview_chart_research_tests
+        COMMAND tradingview_chart_research_tests
+    )
+
     set_tests_properties(
         tradingview_chart_tests
         tradingview_chart_indicator_tests
+        tradingview_chart_watchlist_tests
+        tradingview_chart_research_tests
         PROPERTIES
         ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:Qt6::Core>"

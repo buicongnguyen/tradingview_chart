@@ -2,6 +2,7 @@
 
 #include "data/market_data_parser.hpp"
 
+#include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkRequest>
 #include <QUrl>
@@ -69,7 +70,7 @@ struct YahooQuery {
     QNetworkRequest request(url);
     request.setHeader(
         QNetworkRequest::UserAgentHeader,
-        QStringLiteral("TradingViewChart/0.1.0 (Qt 6; personal desktop client)"));
+        QStringLiteral("TradingViewChart/0.3.0 (Qt 6; personal desktop client)"));
     request.setRawHeader("Accept", "application/json");
     request.setTransferTimeout(15'000);
     request.setAttribute(
@@ -165,9 +166,12 @@ void MarketDataClient::requestYahoo(
             if (error.isEmpty()) {
                 auto parsed = MarketDataParser::parseYahoo(payload);
                 if (parsed.ok()) {
+                    parsed.metadata.retrievedAtUtc =
+                        QDateTime::currentSecsSinceEpoch();
                     callback({
                         .bars = std::move(parsed.bars),
                         .source = QStringLiteral("Yahoo Finance"),
+                        .metadata = std::move(parsed.metadata),
                     });
                     return;
                 }
@@ -236,9 +240,12 @@ void MarketDataClient::requestTwelveData(
             if (twelveError.isEmpty()) {
                 auto parsed = MarketDataParser::parseTwelveData(payload);
                 if (parsed.ok()) {
+                    parsed.metadata.retrievedAtUtc =
+                        QDateTime::currentSecsSinceEpoch();
                     callback({
                         .bars = std::move(parsed.bars),
                         .source = QStringLiteral("Twelve Data"),
+                        .metadata = std::move(parsed.metadata),
                     });
                     return;
                 }

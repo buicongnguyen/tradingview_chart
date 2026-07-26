@@ -23,7 +23,7 @@ body {
 
 #app {
   display: grid;
-  grid-template-rows: 32px minmax(0, 1fr);
+  grid-template-rows: 32px 28px minmax(0, 1fr);
   position: relative;
 }
 
@@ -58,6 +58,22 @@ body {
   margin-left: auto;
 }
 
+#crosshair-details {
+  align-items: center;
+  background: #171b26;
+  border-bottom: 1px solid #2a2e39;
+  color: #b2b5be;
+  display: flex;
+  font-size: 11px;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 12px;
+  text-overflow: ellipsis;
+  user-select: none;
+  white-space: nowrap;
+}
+
 #chart {
   min-height: 0;
   width: 100%;
@@ -84,6 +100,12 @@ body.light {
 body.light #chart-header {
   background: #fff;
   border-bottom-color: #e0e3eb;
+}
+
+body.light #crosshair-details {
+  background: #f7f8fa;
+  border-bottom-color: #e0e3eb;
+  color: #434651;
 }
 
 body.light #symbol {
