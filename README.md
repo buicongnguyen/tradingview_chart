@@ -5,6 +5,12 @@ An online-capable C++20/Qt 6 chart viewer for Windows and Android, powered by
 TradeChart Lab is an independent project and is not affiliated with or endorsed
 by TradingView.
 
+Read the public, task-oriented
+[Building TradeChart Lab project book](https://buicongnguyen.github.io/tradingview_chart/)
+for the complete architecture, Windows and Android build, testing, Git/SSH,
+release, and GitHub Pages delivery process. The book source lives under
+[`docs`](docs/README.md) and is validated before every Pages deployment.
+
 The application does **not** require Alpaca, a broker account, or an application
 backend. It requests the active symbol from Yahoo Finance first. If that request
 fails and `TWELVE_DATA_API_KEY` is configured, it uses Twelve Data as a
