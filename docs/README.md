@@ -21,6 +21,10 @@ Then open `http://localhost:8080/`.
   test's expected order.
 - Keep every chapter in the continuous document flow and update the scroll-spy
   behavior when navigation structure changes.
+- Prefer a diagram when three or more dependencies, branches, or delivery stages
+  are harder to scan as prose; keep simple facts and short procedures as text.
+- Give every diagram a complete accessible label and verify its connectors,
+  labels, and wrapping at desktop and phone widths.
 - Do not add runtime CDN dependencies, credentials, analytics, or tracking.
 - Run `npm run test:web` before committing.
 

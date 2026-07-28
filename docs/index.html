@@ -142,6 +142,24 @@
           The application requests Yahoo Finance first, can fall back to Twelve Data when a key is
           present, and uses deterministic demo data when neither provider succeeds.</p>
 
+        <div class="visual-diagram" data-diagram="provider-fallback" role="img"
+          aria-label="Market-data fallback flow: a symbol request tries Yahoo Finance first; if unavailable it tries Twelve Data when configured; if providers fail it loads clearly labelled deterministic demo data.">
+          <div class="visual-flow">
+            <div class="visual-node"><strong>Symbol request</strong><span>Ticker and interval</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="primary"><strong>Yahoo Finance</strong>
+              <span>Primary polled source</span><em>Success: use and label</em></div>
+            <span class="visual-arrow" aria-hidden="true"><small>If unavailable</small><b>→</b></span>
+            <div class="visual-node" data-tone="fallback"><strong>Twelve Data</strong>
+              <span>Optional configured fallback</span><em>Success: use and label</em></div>
+            <span class="visual-arrow" aria-hidden="true"><small>If unavailable</small><b>→</b></span>
+            <div class="visual-node" data-tone="demo"><strong>Deterministic demo</strong>
+              <span>Offline-safe last resort</span><em>Never presented as live</em></div>
+          </div>
+          <p class="visual-caption">The first successful provider ends the chain. Every result keeps
+            its source, timestamp, and demo/market status visible.</p>
+        </div>
+
         <div class="callout important">
           <strong>Keep the boundary clear</strong>
           <p>This is a research and paper-simulation tool. It does not connect to a broker, place
@@ -375,6 +393,24 @@ $env:FRED_API_KEY = 'session-only-value'</code></pre>
         <p class="lead">The reliable deliverable is the tested ZIP produced by
           <code>package-windows.ps1</code>, not the raw executable inside the build tree.</p>
 
+        <h2>Packaging pipeline</h2>
+        <div class="visual-diagram" data-diagram="windows-package" role="img"
+          aria-label="Windows packaging pipeline: synchronize local web assets, build the Release application, run automated tests, deploy the complete Qt runtime and smoke-test it, then create the ZIP and SHA-256 checksum.">
+          <div class="visual-flow">
+            <div class="visual-node"><strong>Sync assets</strong><span>Renderer, licenses, versions</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node"><strong>Build Release</strong><span>CMake + MSVC + Qt</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="primary"><strong>Run tests</strong><span>Web + native gates</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="fallback"><strong>Deploy + smoke</strong>
+              <span>Complete Qt runtime</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="result"><strong>ZIP + SHA-256</strong>
+              <span>Portable deliverable</span></div>
+          </div>
+        </div>
+
         <h2>One-time Qt bootstrap</h2>
         <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\bootstrap-qt.ps1</code></pre>
         <p>The script installs Qt 6.8.3 under <code>.qt</code> with WebEngine, WebChannel, and
@@ -427,6 +463,30 @@ $env:PATH = "$qtRoot\bin;$env:PATH"
         <p class="lead">Android shares the validated data and chart concepts, but uses its own
           Qt Quick presentation and Android-native network bridge. Desktop docks, multi-chart
           workspaces, and tray alerts are intentionally not claimed as mobile features.</p>
+
+        <h2>Release trust path</h2>
+        <div class="visual-diagram" data-diagram="android-signing" role="img"
+          aria-label="Android release trust path: source and the pinned Android toolchain produce an unsigned ARM64 APK; that APK and the established private signing key meet only at signing; the certificate is verified before the signed APK and checksum are released. CI never receives the private key and publishes an unsigned artifact.">
+          <div class="visual-inputs">
+            <div class="visual-node"><strong>Source + pinned toolchain</strong>
+              <span>Qt, SDK, NDK, JDK</span><em>Produces unsigned ARM64 APK</em></div>
+            <div class="visual-node" data-tone="secure"><strong>Established signing key</strong>
+              <span>Outside Git and CI</span><em>Back up; never replace casually</em></div>
+          </div>
+          <div class="visual-join" aria-hidden="true"><span>Both meet only at signing</span><b>↓</b></div>
+          <div class="visual-flow">
+            <div class="visual-node" data-tone="primary"><strong>Sign APK</strong>
+              <span>Canonical application identity</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="fallback"><strong>Verify certificate</strong>
+              <span>Identity and package checks</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="result"><strong>Signed APK + SHA-256</strong>
+              <span>Installable release</span></div>
+          </div>
+          <p class="visual-caption"><strong>CI path:</strong> build → inspect permissions and
+            contents → publish a clearly labelled unsigned APK. No signing secret crosses that boundary.</p>
+        </div>
 
         <h2>Prepare the toolchain</h2>
         <p>Install Android Studio command-line tools and JDK 17 or newer. The expected default SDK
@@ -543,6 +603,27 @@ ctest --test-dir .\build-release -C Release --output-on-failure</code></pre>
         <p class="lead">A good commit is a coherent statement: the diff, tests, documentation, and
           commit message all describe the same outcome.</p>
 
+        <h2>Review path</h2>
+        <div class="visual-diagram" data-diagram="git-review" role="img"
+          aria-label="Reviewable Git delivery path: update main, create a focused branch, inspect and test the change, commit it, push through the SSH remote, open a draft pull request, pass required checks, then merge.">
+          <div class="visual-flow">
+            <div class="visual-node"><strong>Current main</strong><span>Fast-forward first</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node"><strong>Focused branch</strong><span>One user outcome</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="primary"><strong>Review + test</strong>
+              <span>Diff, logic, packages</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node"><strong>Commit</strong><span>Explicit intended files</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="fallback"><strong>SSH push + PR</strong>
+              <span>Draft while work remains</span></div>
+            <span class="visual-arrow" aria-hidden="true"><b>→</b></span>
+            <div class="visual-node" data-tone="result"><strong>Checks → merge</strong>
+              <span>Evidence before delivery</span></div>
+          </div>
+        </div>
+
         <h2>Start from current main</h2>
         <pre data-language="PowerShell"><code>git switch main
 git pull --ff-only origin main
@@ -595,6 +676,27 @@ git push --set-upstream origin codex/short-description</code></pre>
           A green badge means that exact revision passed the scripted gates—not that every manual
           device or financial-semantic check has been performed.</p>
 
+        <h2>One revision, three evidence lanes</h2>
+        <div class="visual-diagram" data-diagram="ci-lanes" role="img"
+          aria-label="Continuous integration fan-out: the same commit SHA enters independent Windows, Android, and Pages lanes. Windows outputs a tested ZIP and checksum; Android outputs an inspected unsigned APK and checksum; Pages validates the book and deploys docs only from main. Required results gate merge and release decisions.">
+          <div class="visual-source"><strong>Same commit SHA</strong>
+            <span>Pull request or trusted main revision</span></div>
+          <div class="visual-split" aria-hidden="true">↓ fan out without changing source ↓</div>
+          <div class="visual-lanes">
+            <div class="visual-lane" data-tone="primary"><strong>Windows</strong>
+              <span>Web integrity → Qt build → tests → deploy → smoke</span>
+              <em>ZIP + SHA-256</em></div>
+            <div class="visual-lane" data-tone="fallback"><strong>Android</strong>
+              <span>Web integrity → Qt/NDK build → manifest and APK checks</span>
+              <em>Unsigned APK + SHA-256</em></div>
+            <div class="visual-lane" data-tone="result"><strong>Pages</strong>
+              <span>Book integrity → docs artifact → protected environment</span>
+              <em>Deploy only from main</em></div>
+          </div>
+          <div class="visual-gate"><strong>Evidence gate</strong>
+            <span>Merge or release only when the required result for that exact revision passes.</span></div>
+        </div>
+
         <h2>Windows workflow</h2>
         <ol class="steps">
           <li>Checkout source and install Node.js and Python.</li>
@@ -642,6 +744,24 @@ gh run view RUN_ID --log-failed</code></pre>
         <h1>Publish installable application artifacts</h1>
         <p class="lead">GitHub Pages publishes documentation. GitHub Releases publishes the Windows
           package and Android APK. Keep those responsibilities separate.</p>
+
+        <h2>Distribution map</h2>
+        <div class="visual-diagram" data-diagram="release-channels" role="img"
+          aria-label="Distribution map: a tested tagged main commit produces a Windows ZIP and checksum for GitHub Releases, a locally signed Android APK and checksum for GitHub Releases, and the docs directory for GitHub Pages.">
+          <div class="visual-source"><strong>Tested, tagged main commit</strong>
+            <span>One immutable source revision</span></div>
+          <div class="visual-split" aria-hidden="true">↓ publish by responsibility ↓</div>
+          <div class="visual-lanes artifact-lanes">
+            <div class="visual-lane" data-tone="primary"><strong>Windows</strong>
+              <span>Portable ZIP + SHA-256</span><em>GitHub Release</em></div>
+            <div class="visual-lane" data-tone="secure"><strong>Android</strong>
+              <span>Signed ARM64 APK + SHA-256</span><em>GitHub Release</em></div>
+            <div class="visual-lane" data-tone="result"><strong>Project book</strong>
+              <span>Validated <code>docs</code> directory</span><em>GitHub Pages</em></div>
+          </div>
+          <p class="visual-caption">Verify every channel from a signed-out or private browser.
+            A successful upload is not proof that a public consumer can install or read it.</p>
+        </div>
 
         <h2>Pre-release gate</h2>
         <ul class="check-list">

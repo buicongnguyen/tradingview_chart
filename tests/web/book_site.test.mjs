@@ -118,6 +118,27 @@ test("book uses continuous scrolling with active chapter tracking", async () => 
   assert.doesNotMatch(script, /setAttribute\("aria-hidden"/);
 });
 
+test("process diagrams are accessible, substantial, and responsive", async () => {
+  const html = await text("docs/index.html");
+  const styles = await text("docs/styles.css");
+  const diagramLabels = matches(
+    html,
+    /<div class="visual-diagram" data-diagram="[^"]+" role="img"\s+aria-label="([^"]+)">/g,
+  );
+  const diagramIds = matches(
+    html,
+    /<div class="visual-diagram" data-diagram="([^"]+)" role="img"/g,
+  );
+
+  assert.equal(diagramIds.length, 6);
+  assert.equal(new Set(diagramIds).size, diagramIds.length);
+  assert.equal(diagramLabels.length, diagramIds.length);
+  assert.ok(diagramLabels.every((label) => label.length > 80));
+  assert.match(styles, /\.visual-flow\s*\{[\s\S]*display:\s*flex/);
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*\.visual-flow\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(styles, /\.visual-inputs,[\s\S]*\.visual-lanes\s*\{[\s\S]*display:\s*grid/);
+});
+
 test("client script avoids dynamic code execution and remote requests", async () => {
   const script = await text("docs/app.js");
   assert.doesNotMatch(script, /\beval\s*\(/);
