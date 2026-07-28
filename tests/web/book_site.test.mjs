@@ -92,6 +92,8 @@ test("book has substantial content, accessibility landmarks, and metadata", asyn
   assert.match(html, /class="skip-link"/);
   assert.match(styles, /@media print/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(styles, /scroll-margin-top:/);
+  assert.match(await text("docs/app.js"), /settleInitialPosition/);
 });
 
 test("client script avoids dynamic code execution and remote requests", async () => {
