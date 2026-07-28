@@ -43,10 +43,6 @@ html[data-theme="light"] {
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
 body {
   margin: 0;
   background:
@@ -507,6 +503,7 @@ pre code {
 
 .chapter {
   display: none;
+  scroll-margin-top: calc(var(--topbar-height) + 1rem);
   animation: chapter-in .28s ease;
 }
 

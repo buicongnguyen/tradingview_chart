@@ -332,4 +332,23 @@
     history.replaceState(null, "", `#${chapters[0].id}`);
   }
   activateChapter(requestedChapterId(), { instant: true });
+
+  const settleInitialPosition = () => {
+    const reset = () => {
+      if (document.scrollingElement) {
+        document.scrollingElement.scrollTop = 0;
+      }
+      window.scrollTo(0, 0);
+    };
+    reset();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(reset);
+    });
+    window.setTimeout(reset, 100);
+  };
+  if (document.readyState === "complete") {
+    settleInitialPosition();
+  } else {
+    window.addEventListener("load", settleInitialPosition, { once: true });
+  }
 })();
