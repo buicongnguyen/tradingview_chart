@@ -13,22 +13,31 @@
   const linkById = new Map(
     navigationLinks.map((link) => [link.hash.slice(1), link]),
   );
+  const partById = new Map();
+  document.querySelectorAll("#chapter-nav .nav-group-label").forEach((label) => {
+    label.nextElementSibling?.querySelectorAll('a[href^="#"]').forEach((link) => {
+      partById.set(link.hash.slice(1), label.textContent.trim());
+    });
+  });
+
   const sidebar = document.querySelector("#sidebar");
+  const chapterNavigation = document.querySelector("#chapter-nav");
   const menuButton = document.querySelector("#menu-button");
   const sidebarScrim = document.querySelector("#sidebar-scrim");
-  const previousButton = document.querySelector("#previous-chapter");
-  const nextButton = document.querySelector("#next-chapter");
   const completeButton = document.querySelector("#mark-complete");
   const searchInput = document.querySelector("#book-search");
   const searchResults = document.querySelector("#search-results");
   const readingProgress = document.querySelector("#reading-progress-bar");
   const completionBar = document.querySelector("#completion-bar");
   const completedCount = document.querySelector("#completed-count");
+  const currentPartLabel = document.querySelector("#current-part-label");
+  const currentChapterLabel = document.querySelector("#current-chapter-label");
   const themeButton = document.querySelector("#theme-button");
   const resetButton = document.querySelector("#reset-progress");
   const mobileNavigation = window.matchMedia("(max-width: 1000px)");
 
   let activeIndex = 0;
+  let scrollUpdatePending = false;
   let completed = new Set(
     [...readSet(storageKeys.completed)].filter((id) => chapterById.has(id)),
   );
@@ -37,7 +46,11 @@
   function readSet(key) {
     try {
       const value = JSON.parse(localStorage.getItem(key) || "[]");
-      return new Set(Array.isArray(value) ? value.filter((item) => typeof item === "string") : []);
+      return new Set(
+        Array.isArray(value)
+          ? value.filter((item) => typeof item === "string")
+          : [],
+      );
     } catch {
       return new Set();
     }
@@ -47,7 +60,7 @@
     try {
       localStorage.setItem(key, JSON.stringify([...values]));
     } catch {
-      // The guide remains usable when storage is disabled.
+      // The reader remains usable when local storage is disabled.
     }
   }
 
@@ -64,66 +77,142 @@
     return chapterById.has(id) ? id : chapters[0].id;
   }
 
-  function activateChapter(id, options = {}) {
+  function chapterNumber(index) {
+    return String(index + 1).padStart(2, "0");
+  }
+
+  function setActiveChapter(id, { replaceHash = false } = {}) {
     const chapter = chapterById.get(id) || chapters[0];
-    activeIndex = chapters.indexOf(chapter);
+    const nextIndex = chapters.indexOf(chapter);
+    const changed = nextIndex !== activeIndex
+      || !linkById.get(chapter.id)?.classList.contains("active");
+    activeIndex = nextIndex;
 
-    chapters.forEach((item) => {
-      item.classList.toggle("active", item === chapter);
-      item.setAttribute("aria-hidden", item === chapter ? "false" : "true");
-    });
-    navigationLinks.forEach((link) => {
-      const active = link.hash === `#${chapter.id}`;
-      link.classList.toggle("active", active);
-      if (active) {
-        link.setAttribute("aria-current", "page");
-      } else {
-        link.removeAttribute("aria-current");
+    if (changed) {
+      navigationLinks.forEach((link) => {
+        const active = link.hash === `#${chapter.id}`;
+        link.classList.toggle("active", active);
+        if (active) {
+          link.setAttribute("aria-current", "location");
+        } else {
+          link.removeAttribute("aria-current");
+        }
+      });
+      currentPartLabel.textContent =
+        partById.get(chapter.id) || "Project book";
+      currentChapterLabel.textContent =
+        `${chapterNumber(activeIndex)} / ${chapters.length} · ${chapter.dataset.title}`;
+      document.title = `${chapter.dataset.title} — Building TradeChart Lab`;
+      updateCompletion();
+
+      const activeLink = linkById.get(chapter.id);
+      if (activeLink && chapterNavigation && !mobileNavigation.matches) {
+        const navBounds = chapterNavigation.getBoundingClientRect();
+        const linkBounds = activeLink.getBoundingClientRect();
+        const edgePadding = 8;
+
+        if (linkBounds.top < navBounds.top + edgePadding) {
+          chapterNavigation.scrollTop -=
+            navBounds.top + edgePadding - linkBounds.top;
+        } else if (linkBounds.bottom > navBounds.bottom - edgePadding) {
+          chapterNavigation.scrollTop +=
+            linkBounds.bottom - navBounds.bottom + edgePadding;
+        }
       }
-    });
-
-    document.title = `${chapter.dataset.title} — Building TradeChart Lab`;
-    updatePaging();
-    updateProgress();
-    closeSidebar();
-
-    if (!options.preserveScroll) {
-      window.scrollTo({ top: 0, behavior: options.instant ? "auto" : "smooth" });
     }
+
+    if (replaceHash && location.hash !== `#${chapter.id}`) {
+      history.replaceState(null, "", `#${chapter.id}`);
+    }
+  }
+
+  function chapterAtReadingLine() {
+    const headerHeight =
+      document.querySelector(".topbar")?.getBoundingClientRect().height || 0;
+    const readingLine =
+      window.scrollY + headerHeight + Math.min(window.innerHeight * 0.22, 170);
+    let selected = chapters[0];
+    for (const chapter of chapters) {
+      const chapterTop =
+        chapter.getBoundingClientRect().top + window.scrollY;
+      if (chapterTop <= readingLine) {
+        selected = chapter;
+      } else {
+        break;
+      }
+    }
+
+    const pageBottom = window.scrollY + window.innerHeight;
+    const documentBottom = document.documentElement.scrollHeight - 2;
+    return pageBottom >= documentBottom
+      ? chapters[chapters.length - 1]
+      : selected;
+  }
+
+  function updateReadingProgress() {
+    const available =
+      document.documentElement.scrollHeight - window.innerHeight;
+    const percentage = available > 0
+      ? Math.min(100, Math.max(0, (window.scrollY / available) * 100))
+      : 100;
+    readingProgress.style.width = `${percentage}%`;
+  }
+
+  function updateFromScroll() {
+    scrollUpdatePending = false;
+    const chapter = chapterAtReadingLine();
+    setActiveChapter(chapter.id, { replaceHash: true });
+    updateReadingProgress();
+  }
+
+  function scheduleScrollUpdate() {
+    if (scrollUpdatePending) {
+      return;
+    }
+    scrollUpdatePending = true;
+    window.requestAnimationFrame(updateFromScroll);
+  }
+
+  function scrollToChapter(id, { smooth = true, pushHistory = false } = {}) {
+    const chapter = chapterById.get(id);
+    if (!chapter) {
+      return;
+    }
+    if (pushHistory && location.hash !== `#${id}`) {
+      history.pushState(null, "", `#${id}`);
+    }
+    chapter.scrollIntoView({
+      behavior: smooth ? "smooth" : "auto",
+      block: "start",
+    });
+    setActiveChapter(id);
   }
 
   function navigateTo(index) {
     if (index < 0 || index >= chapters.length) {
       return;
     }
-    location.hash = chapters[index].id;
+    scrollToChapter(chapters[index].id, {
+      smooth: true,
+      pushHistory: true,
+    });
   }
 
-  function updatePaging() {
-    const previous = chapters[activeIndex - 1];
-    const next = chapters[activeIndex + 1];
-    previousButton.disabled = !previous;
-    nextButton.disabled = !next;
-    previousButton.querySelector("strong").textContent = previous?.dataset.title || "";
-    nextButton.querySelector("strong").textContent = next?.dataset.title || "";
+  function updateCompletion() {
+    const completeProgress = (completed.size / chapters.length) * 100;
+    completionBar.style.width = `${completeProgress}%`;
+    completedCount.textContent =
+      `${completed.size} of ${chapters.length} complete`;
+    linkById.forEach((link, id) => {
+      link.classList.toggle("completed", completed.has(id));
+    });
 
     const currentId = chapters[activeIndex].id;
     const done = completed.has(currentId);
     completeButton.classList.toggle("done", done);
     completeButton.setAttribute("aria-pressed", String(done));
     completeButton.querySelector(".complete-label").textContent =
-      done ? "Completed" : "Mark complete";
-  }
-
-  function updateProgress() {
-    const chapterProgress = ((activeIndex + 1) / chapters.length) * 100;
-    readingProgress.style.width = `${chapterProgress}%`;
-    const completeProgress = (completed.size / chapters.length) * 100;
-    completionBar.style.width = `${completeProgress}%`;
-    completedCount.textContent = `${completed.size} of ${chapters.length} complete`;
-    linkById.forEach((link, id) => {
-      link.classList.toggle("completed", completed.has(id));
-    });
+      done ? "Chapter completed" : "Mark chapter complete";
   }
 
   function toggleComplete() {
@@ -134,31 +223,29 @@
       completed.add(id);
     }
     writeSet(storageKeys.completed, completed);
-    updatePaging();
-    updateProgress();
+    updateCompletion();
   }
 
   function openSidebar() {
     sidebar.removeAttribute("inert");
     document.body.classList.add("sidebar-open");
     menuButton.setAttribute("aria-expanded", "true");
-    sidebar.querySelector("input")?.focus();
   }
 
-  function closeSidebar() {
+  function closeSidebar({ restoreFocus = false } = {}) {
     document.body.classList.remove("sidebar-open");
     menuButton.setAttribute("aria-expanded", "false");
     if (mobileNavigation.matches) {
       sidebar.setAttribute("inert", "");
+      if (restoreFocus) {
+        menuButton.focus({ preventScroll: true });
+      }
     } else {
       sidebar.removeAttribute("inert");
     }
   }
 
   function synchronizeNavigationMode() {
-    if (!mobileNavigation.matches) {
-      document.body.classList.remove("sidebar-open");
-    }
     closeSidebar();
   }
 
@@ -173,7 +260,8 @@
     const matches = chapters
       .map((chapter) => {
         const text = chapter.textContent.replace(/\s+/g, " ").trim();
-        const haystack = `${chapter.dataset.title} ${text}`.toLocaleLowerCase();
+        const haystack =
+          `${chapter.dataset.title} ${text}`.toLocaleLowerCase();
         const index = haystack.indexOf(normalized);
         if (index < 0) {
           return null;
@@ -181,7 +269,10 @@
         const textIndex = text.toLocaleLowerCase().indexOf(normalized);
         const start = Math.max(0, textIndex - 42);
         const excerpt = textIndex >= 0
-          ? `${start > 0 ? "…" : ""}${text.slice(start, textIndex + normalized.length + 64)}…`
+          ? `${start > 0 ? "…" : ""}${text.slice(
+            start,
+            textIndex + normalized.length + 64,
+          )}…`
           : text.slice(0, 110);
         return { chapter, excerpt, rank: index };
       })
@@ -213,11 +304,15 @@
   }
 
   function setTheme(theme) {
-    const value = theme === "light" ? "light" : "dark";
+    const value = theme === "dark" ? "dark" : "light";
     document.documentElement.dataset.theme = value;
     themeButton.setAttribute(
       "aria-label",
       value === "dark" ? "Switch to light theme" : "Switch to dark theme",
+    );
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      "content",
+      value === "dark" ? "#10151f" : "#f7f9fc",
     );
     try {
       localStorage.setItem(storageKeys.theme, value);
@@ -233,10 +328,7 @@
     } catch {
       saved = "";
     }
-    const preferred = window.matchMedia("(prefers-color-scheme: light)").matches
-      ? "light"
-      : "dark";
-    setTheme(saved || preferred);
+    setTheme(saved || "light");
   }
 
   function initializeCodeBlocks() {
@@ -245,10 +337,15 @@
       button.type = "button";
       button.className = "copy-button";
       button.textContent = "Copy";
-      button.setAttribute("aria-label", `Copy ${block.dataset.language || "code"} block`);
+      button.setAttribute(
+        "aria-label",
+        `Copy ${block.dataset.language || "code"} block`,
+      );
       button.addEventListener("click", async () => {
         try {
-          await navigator.clipboard.writeText(block.querySelector("code")?.textContent || "");
+          await navigator.clipboard.writeText(
+            block.querySelector("code")?.textContent || "",
+          );
           button.textContent = "Copied";
         } catch {
           button.textContent = "Select text";
@@ -277,18 +374,20 @@
 
   menuButton.addEventListener("click", () => {
     if (document.body.classList.contains("sidebar-open")) {
-      closeSidebar();
+      closeSidebar({ restoreFocus: true });
     } else {
       openSidebar();
     }
   });
-  sidebarScrim.addEventListener("click", closeSidebar);
-  previousButton.addEventListener("click", () => navigateTo(activeIndex - 1));
-  nextButton.addEventListener("click", () => navigateTo(activeIndex + 1));
+  sidebarScrim.addEventListener("click", () => {
+    closeSidebar({ restoreFocus: true });
+  });
   completeButton.addEventListener("click", toggleComplete);
   searchInput.addEventListener("input", () => renderSearch(searchInput.value));
   themeButton.addEventListener("click", () => {
-    setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+    setTheme(
+      document.documentElement.dataset.theme === "dark" ? "light" : "dark",
+    );
   });
   resetButton.addEventListener("click", () => {
     completed = new Set();
@@ -298,23 +397,58 @@
     document.querySelectorAll("[data-check]").forEach((input) => {
       input.checked = false;
     });
-    updatePaging();
-    updateProgress();
+    updateCompletion();
   });
-  window.addEventListener("hashchange", () => activateChapter(requestedChapterId()));
+
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest('a[href^="#"]');
+    if (!link) {
+      return;
+    }
+    const id = link.hash.slice(1);
+    if (!chapterById.has(id)) {
+      return;
+    }
+    event.preventDefault();
+    const drawerWasOpen =
+      mobileNavigation.matches
+      && document.body.classList.contains("sidebar-open");
+    closeSidebar({ restoreFocus: drawerWasOpen });
+    const navigate = () => {
+      scrollToChapter(id, {
+        smooth: !drawerWasOpen,
+        pushHistory: true,
+      });
+    };
+    if (drawerWasOpen) {
+      // Let the off-canvas transition finish so its focused link cannot
+      // interrupt the document scroll on touch browsers.
+      window.setTimeout(navigate, 240);
+    } else {
+      navigate();
+    }
+  });
+
+  window.addEventListener("scroll", scheduleScrollUpdate, { passive: true });
+  window.addEventListener("resize", scheduleScrollUpdate);
+  window.addEventListener("popstate", () => {
+    scrollToChapter(requestedChapterId(), { smooth: false });
+  });
   mobileNavigation.addEventListener("change", synchronizeNavigationMode);
   document.addEventListener("keydown", (event) => {
-    const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement?.tagName);
+    const typing = ["INPUT", "TEXTAREA"].includes(
+      document.activeElement?.tagName,
+    );
     if (event.key === "/" && !typing) {
       event.preventDefault();
-      searchInput.focus();
-      if (window.innerWidth <= 1000) {
+      if (mobileNavigation.matches) {
         openSidebar();
       }
+      searchInput.focus();
     } else if (event.key === "Escape") {
       searchInput.value = "";
       renderSearch("");
-      closeSidebar();
+      closeSidebar({ restoreFocus: mobileNavigation.matches });
     } else if (event.altKey && event.key === "ArrowLeft" && !typing) {
       event.preventDefault();
       navigateTo(activeIndex - 1);
@@ -328,27 +462,14 @@
   initializeCodeBlocks();
   initializeChecklist();
   synchronizeNavigationMode();
-  if (!chapterById.has(rawChapterId())) {
-    history.replaceState(null, "", `#${chapters[0].id}`);
-  }
-  activateChapter(requestedChapterId(), { instant: true });
+  setActiveChapter(requestedChapterId());
+  updateReadingProgress();
 
-  const settleInitialPosition = () => {
-    const reset = () => {
-      if (document.scrollingElement) {
-        document.scrollingElement.scrollTop = 0;
-      }
-      window.scrollTo(0, 0);
-    };
-    reset();
+  if (chapterById.has(rawChapterId())) {
     window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(reset);
+      scrollToChapter(rawChapterId(), { smooth: false });
     });
-    window.setTimeout(reset, 100);
-  };
-  if (document.readyState === "complete") {
-    settleInitialPosition();
   } else {
-    window.addEventListener("load", settleInitialPosition, { once: true });
+    history.replaceState(null, "", `#${chapters[0].id}`);
   }
 })();

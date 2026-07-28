@@ -93,7 +93,29 @@ test("book has substantial content, accessibility landmarks, and metadata", asyn
   assert.match(styles, /@media print/);
   assert.match(styles, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(styles, /scroll-margin-top:/);
-  assert.match(await text("docs/app.js"), /settleInitialPosition/);
+  assert.match(styles, /#chapter-nav\s*\{[\s\S]*overflow-y:\s*auto/);
+});
+
+test("book uses continuous scrolling with active chapter tracking", async () => {
+  const html = await text("docs/index.html");
+  const styles = await text("docs/styles.css");
+  const script = await text("docs/app.js");
+
+  assert.match(styles, /\.chapter\s*\{[\s\S]*display:\s*block/);
+  assert.doesNotMatch(styles, /\.chapter\.active\s*\{[\s\S]*display:\s*block/);
+  assert.doesNotMatch(html, /id="previous-chapter"|id="next-chapter"/);
+  assert.doesNotMatch(html, /class="chapter-footer"/);
+  assert.match(script, /chapterAtReadingLine/);
+  assert.match(script, /scheduleScrollUpdate/);
+  assert.match(script, /scrollIntoView/);
+  assert.match(script, /history\.replaceState/);
+  assert.match(
+    script,
+    /function synchronizeNavigationMode\(\)\s*\{\s*closeSidebar\(\);/,
+  );
+  assert.match(script, /closeSidebar\(\{ restoreFocus: drawerWasOpen \}\)/);
+  assert.match(styles, /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(script, /setAttribute\("aria-hidden"/);
 });
 
 test("client script avoids dynamic code execution and remote requests", async () => {
@@ -103,7 +125,7 @@ test("client script avoids dynamic code execution and remote requests", async ()
   assert.doesNotMatch(script, /\bfetch\s*\(/);
   assert.doesNotMatch(script, /\bXMLHttpRequest\b/);
   assert.match(script, /localStorage/);
-  assert.match(script, /prefers-color-scheme/);
+  assert.match(script, /setTheme\(saved \|\| "light"\)/);
 });
 
 test("Pages workflow validates pull requests and deploys docs only from main", async () => {

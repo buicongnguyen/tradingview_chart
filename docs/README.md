@@ -19,6 +19,8 @@ Then open `http://localhost:8080/`.
 - Preserve the chapter IDs because public deep links and navigation use them.
 - Add every chapter to the sidebar, the article collection, and the integrity
   test's expected order.
+- Keep every chapter in the continuous document flow and update the scroll-spy
+  behavior when navigation structure changes.
 - Do not add runtime CDN dependencies, credentials, analytics, or tracking.
 - Run `npm run test:web` before committing.
 

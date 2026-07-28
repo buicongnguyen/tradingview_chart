@@ -1,16 +1,15 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="A practical, end-to-end guide to building, testing, publishing, and maintaining TradeChart Lab.">
-  <meta name="theme-color" content="#10151f">
+  <meta name="theme-color" content="#f7f9fc">
   <title>Building TradeChart Lab — The Project Book</title>
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
   <noscript><style>
     .chapter { display: block !important; }
-    .chapter-footer { display: none !important; }
   </style></noscript>
 </head>
 <body>
@@ -32,6 +31,10 @@
         <small>The project book</small>
       </span>
     </a>
+    <div class="topbar-status" aria-live="polite">
+      <span id="current-part-label">Part I · Understand</span>
+      <strong id="current-chapter-label">01 / 12 · Welcome</strong>
+    </div>
     <div class="topbar-actions">
       <a class="repo-link" href="https://github.com/buicongnguyen/tradingview_chart"
          target="_blank" rel="noreferrer">Repository</a>
@@ -44,6 +47,10 @@
 
   <div class="book-shell">
     <aside class="sidebar" id="sidebar" aria-label="Book navigation">
+      <div class="sidebar-intro">
+        <strong>Project book</strong>
+        <span>12 chapters · build, prove, and publish</span>
+      </div>
       <div class="search-wrap">
         <label for="book-search">Search this book</label>
         <div class="search-field">
@@ -86,11 +93,17 @@
       </nav>
 
       <div class="sidebar-footer">
-        <div>
-          <span id="completed-count">0 of 12 complete</span>
-          <span class="mini-progress"><span id="completion-bar"></span></span>
+        <button id="mark-complete" class="complete-button" type="button">
+          <span class="complete-icon">✓</span>
+          <span class="complete-label">Mark chapter complete</span>
+        </button>
+        <div class="completion-summary">
+          <div>
+            <span id="completed-count">0 of 12 complete</span>
+            <span class="mini-progress"><span id="completion-bar"></span></span>
+          </div>
+          <button id="reset-progress" type="button">Reset</button>
         </div>
-        <button id="reset-progress" type="button">Reset</button>
       </div>
     </aside>
 
@@ -782,7 +795,7 @@ gh api repos/buicongnguyen/tradingview_chart/pages --jq '.html_url'</code></pre>
           <li>Artifact names and release examples use the supported version.</li>
           <li>Provider descriptions distinguish official, unofficial, free-plan, and manual sources.</li>
           <li>New workflows and required permissions appear in the delivery chapters.</li>
-          <li>Every new chapter is represented in navigation, search, tests, and previous/next order.</li>
+          <li>Every new chapter is represented in navigation, search, tests, continuous order, and scroll-spy tracking.</li>
         </ul>
 
         <h2>Final handoff checklist</h2>
@@ -803,23 +816,17 @@ gh api repos/buicongnguyen/tradingview_chart/pages --jq '.html_url'</code></pre>
         </div>
       </article>
 
-      <footer class="chapter-footer">
-        <button id="previous-chapter" class="chapter-link previous" type="button">
-          <span>Previous</span><strong></strong>
-        </button>
-        <button id="mark-complete" class="complete-button" type="button">
-          <span class="complete-icon">✓</span><span class="complete-label">Mark complete</span>
-        </button>
-        <button id="next-chapter" class="chapter-link next" type="button">
-          <span>Next</span><strong></strong>
-        </button>
+      <footer class="book-end">
+        <span>End of the project book</span>
+        <strong>Continue improving the application with the same evidence-first process.</strong>
+        <a href="#welcome">Return to the beginning ↑</a>
       </footer>
     </main>
   </div>
 
   <noscript>
     <div class="noscript">JavaScript is disabled. All chapters are still available by scrolling,
-      but search, saved progress, theme switching, and chapter paging require JavaScript.</div>
+      but search, saved progress, active chapter tracking, and theme switching require JavaScript.</div>
   </noscript>
 </body>
 </html>
