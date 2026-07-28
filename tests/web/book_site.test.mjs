@@ -111,11 +111,11 @@ test("Pages workflow validates pull requests and deploys docs only from main", a
   assert.match(workflow, /node --test tests\/web\/book_site\.test\.mjs/);
   assert.match(workflow, /uses:\s*actions\/checkout@v6/);
   assert.match(workflow, /uses:\s*actions\/setup-node@v6/);
-  assert.match(workflow, /uses:\s*actions\/configure-pages@v5/);
-  assert.match(workflow, /uses:\s*actions\/upload-pages-artifact@v4/);
+  assert.match(workflow, /uses:\s*actions\/configure-pages@v6/);
+  assert.match(workflow, /uses:\s*actions\/upload-pages-artifact@v5/);
   assert.match(workflow, /path:\s*docs/);
   assert.match(workflow, /include-hidden-files:\s*true/);
-  assert.match(workflow, /uses:\s*actions\/deploy-pages@v4/);
+  assert.match(workflow, /uses:\s*actions\/deploy-pages@v5/);
   assert.match(workflow, /pages:\s*write/);
   assert.match(workflow, /id-token:\s*write/);
   assert.match(workflow, /github\.event_name != 'pull_request'/);
