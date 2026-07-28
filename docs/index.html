@@ -1,0 +1,825 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A practical, end-to-end guide to building, testing, publishing, and maintaining TradeChart Lab.">
+  <meta name="theme-color" content="#10151f">
+  <title>Building TradeChart Lab — The Project Book</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+  <noscript><style>
+    .chapter { display: block !important; }
+    .chapter-footer { display: none !important; }
+  </style></noscript>
+</head>
+<body>
+  <a class="skip-link" href="#chapter-content">Skip to chapter</a>
+  <div class="reading-progress" aria-hidden="true"><span id="reading-progress-bar"></span></div>
+
+  <header class="topbar">
+    <button class="icon-button menu-button" id="menu-button" type="button"
+            aria-label="Open table of contents" aria-controls="sidebar" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <a class="brand" href="#welcome" aria-label="TradeChart Lab book home">
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M6 29V17m7 16V11m7 15V7m7 21V15m7 17V9"/>
+        <path d="m5 25 8-7 7 3 7-9 8 4"/>
+      </svg>
+      <span>
+        <strong>Building TradeChart Lab</strong>
+        <small>The project book</small>
+      </span>
+    </a>
+    <div class="topbar-actions">
+      <a class="repo-link" href="https://github.com/buicongnguyen/tradingview_chart"
+         target="_blank" rel="noreferrer">Repository</a>
+      <button class="icon-button theme-button" id="theme-button" type="button"
+              aria-label="Switch color theme" title="Switch color theme">
+        <span class="theme-icon" aria-hidden="true">◐</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="book-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Book navigation">
+      <div class="search-wrap">
+        <label for="book-search">Search this book</label>
+        <div class="search-field">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m16.2 16.2 4 4"></path>
+          </svg>
+          <input id="book-search" type="search" placeholder="Build, Android, deploy…"
+                 autocomplete="off" spellcheck="false">
+          <kbd>/</kbd>
+        </div>
+        <div id="search-results" class="search-results" aria-live="polite"></div>
+      </div>
+
+      <nav id="chapter-nav">
+        <p class="nav-group-label">Part I · Understand</p>
+        <ol>
+          <li><a href="#welcome"><span>01</span>Welcome</a></li>
+          <li><a href="#delivery-plan"><span>02</span>Delivery plan</a></li>
+          <li><a href="#architecture"><span>03</span>Architecture</a></li>
+        </ol>
+        <p class="nav-group-label">Part II · Build</p>
+        <ol>
+          <li><a href="#workspace"><span>04</span>Prepare the workspace</a></li>
+          <li><a href="#windows"><span>05</span>Build for Windows</a></li>
+          <li><a href="#android"><span>06</span>Build for Android</a></li>
+        </ol>
+        <p class="nav-group-label">Part III · Prove</p>
+        <ol>
+          <li><a href="#quality"><span>07</span>Test and review</a></li>
+          <li><a href="#git-workflow"><span>08</span>Commit and push</a></li>
+          <li><a href="#automation"><span>09</span>Continuous integration</a></li>
+        </ol>
+        <p class="nav-group-label">Part IV · Publish</p>
+        <ol>
+          <li><a href="#release"><span>10</span>Release the app</a></li>
+          <li><a href="#pages"><span>11</span>Deploy this book</a></li>
+          <li><a href="#operate"><span>12</span>Operate and improve</a></li>
+        </ol>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div>
+          <span id="completed-count">0 of 12 complete</span>
+          <span class="mini-progress"><span id="completion-bar"></span></span>
+        </div>
+        <button id="reset-progress" type="button">Reset</button>
+      </div>
+    </aside>
+
+    <button class="sidebar-scrim" id="sidebar-scrim" type="button"
+            aria-label="Close table of contents"></button>
+
+    <main id="chapter-content" class="book-content" tabindex="-1">
+      <article class="chapter" id="welcome" data-title="Welcome">
+        <div class="chapter-kicker">Chapter 01 · Orientation</div>
+        <h1>Build the product, then build confidence in it.</h1>
+        <p class="lead">This book follows TradeChart Lab from a clean clone to a tested Windows package,
+          a signed Android APK, a GitHub release, and a public GitHub Pages guide. It uses the actual
+          repository layout and scripts—every command has a place in the current project.</p>
+
+        <div class="hero-grid">
+          <div class="hero-card accent-blue">
+            <span class="card-icon">⌁</span>
+            <strong>Desktop</strong>
+            <p>C++20, Qt 6.8.3, WebEngine, and a locally vendored chart renderer.</p>
+          </div>
+          <div class="hero-card accent-mint">
+            <span class="card-icon">◇</span>
+            <strong>Android</strong>
+            <p>Qt Quick, Android WebView, native TLS, and reproducible ARM64 packaging.</p>
+          </div>
+          <div class="hero-card accent-gold">
+            <span class="card-icon">↗</span>
+            <strong>Delivery</strong>
+            <p>SSH Git operations, pull-request checks, release artifacts, and GitHub Pages.</p>
+          </div>
+        </div>
+
+        <h2>What the application is</h2>
+        <p>TradeChart Lab is an independent charting and research application. TradingView
+          Lightweight Charts renders the visual chart, but it does not provide market data.
+          The application requests Yahoo Finance first, can fall back to Twelve Data when a key is
+          present, and uses deterministic demo data when neither provider succeeds.</p>
+
+        <div class="callout important">
+          <strong>Keep the boundary clear</strong>
+          <p>This is a research and paper-simulation tool. It does not connect to a broker, place
+            orders, guarantee provider availability, or predict future returns. Historical tests
+            describe past samples; they do not turn uncertainty into certainty.</p>
+        </div>
+
+        <h2>Choose the path you need</h2>
+        <div class="path-grid">
+          <a href="#windows"><span>Fast path</span><strong>Build the Windows app</strong>
+            <small>Bootstrap → package → run</small></a>
+          <a href="#android"><span>Mobile path</span><strong>Create the signed APK</strong>
+            <small>SDK → Qt kit → sign → verify</small></a>
+          <a href="#release"><span>Publisher path</span><strong>Ship a release</strong>
+            <small>Review → PR → checks → artifacts</small></a>
+          <a href="#pages"><span>Documentation path</span><strong>Deploy this book</strong>
+            <small>Validate → merge → Pages</small></a>
+        </div>
+
+        <h2>Definition of done</h2>
+        <ul class="check-list">
+          <li>The same source revision passes web, native, desktop smoke, and Android package checks.</li>
+          <li>The Windows ZIP includes Qt WebChannel, WebEngine, platform, SQL, network, and TLS runtime files.</li>
+          <li>The release APK is signed with the established key and verified before distribution.</li>
+          <li>The commit is reviewable, pushed through the configured SSH remote, and protected by CI.</li>
+          <li>The public book URL serves exactly the content that was merged to <code>main</code>.</li>
+        </ul>
+      </article>
+
+      <article class="chapter" id="delivery-plan" data-title="Delivery plan">
+        <div class="chapter-kicker">Chapter 02 · The route</div>
+        <h1>A detailed delivery plan</h1>
+        <p class="lead">Treat delivery as a sequence of evidence gates. A phase is complete only
+          when its output is both created and checked.</p>
+
+        <div class="timeline">
+          <section>
+            <span>1</span>
+            <div><h3>Discover</h3><p>Read the repository, confirm the active branch and SSH remote,
+              identify platform boundaries, and inventory existing tests and workflows.</p>
+              <strong>Gate:</strong> no assumptions contradict source or automation.</div>
+          </section>
+          <section>
+            <span>2</span>
+            <div><h3>Design</h3><p>Define user outcome, data flow, platform scope, error states,
+              persistence, security boundaries, and measurable acceptance criteria.</p>
+              <strong>Gate:</strong> the plan says what will not be built as clearly as what will.</div>
+          </section>
+          <section>
+            <span>3</span>
+            <div><h3>Implement</h3><p>Keep domain logic independent from widgets where possible;
+              make desktop and Android adapters explicit; update tests with behavior.</p>
+              <strong>Gate:</strong> code compiles and expected behavior is observable.</div>
+          </section>
+          <section>
+            <span>4</span>
+            <div><h3>Review</h3><p>Inspect correctness, lookahead bias, input bounds, ownership,
+              failure recovery, layout, provider provenance, and package contents.</p>
+              <strong>Gate:</strong> discovered issues are fixed or intentionally documented.</div>
+          </section>
+          <section>
+            <span>5</span>
+            <div><h3>Package</h3><p>Run the same tested scripts used by CI. Produce immutable
+              artifacts and SHA-256 checksums; never distribute a raw desktop executable.</p>
+              <strong>Gate:</strong> the staged package starts without the developer Qt environment.</div>
+          </section>
+          <section>
+            <span>6</span>
+            <div><h3>Publish</h3><p>Commit a focused diff, push over SSH, review in a pull request,
+              require passing checks, merge, create the release, then verify public downloads and Pages.</p>
+              <strong>Gate:</strong> a clean machine or public browser can consume the output.</div>
+          </section>
+        </div>
+
+        <h2>Plan template for a new phase</h2>
+        <div class="template-block">
+          <ol>
+            <li><strong>Outcome:</strong> one sentence describing the user-visible result.</li>
+            <li><strong>Scope:</strong> desktop, Android, shared model, data source, persistence, and UI.</li>
+            <li><strong>Non-goals:</strong> related behavior deliberately excluded.</li>
+            <li><strong>Risks:</strong> data licensing, no-lookahead correctness, security, performance, and migration.</li>
+            <li><strong>Implementation:</strong> files, ownership boundaries, state transitions, and failure paths.</li>
+            <li><strong>Verification:</strong> unit, integration, package, visual, and workflow checks.</li>
+            <li><strong>Delivery:</strong> branch, commit, PR, merge, artifacts, documentation, and rollback.</li>
+          </ol>
+        </div>
+
+        <h2>Review the plan before writing code</h2>
+        <p>Challenge each dependency and transition: where does the value come from; how old may it
+          be; what happens when it is missing; can future information leak into a historical
+          calculation; does Android really implement the same feature; and what will a user see
+          when a provider refuses the request? Convert each answer into a test or visible status.</p>
+
+        <div class="callout tip">
+          <strong>Useful rule</strong>
+          <p>A plan item such as “add analysis” is not executable. “Compute the metric from completed
+            bars, exclude the selected bar’s future, display sample size and source timestamp, and
+            test the first valid index” is.</p>
+        </div>
+      </article>
+
+      <article class="chapter" id="architecture" data-title="Architecture">
+        <div class="chapter-kicker">Chapter 03 · The system</div>
+        <h1>Understand the application before changing it</h1>
+        <p class="lead">The repository separates reusable market and analysis logic from two
+          platform presentations: Qt Widgets with WebEngine on Windows, and Qt Quick with Android
+          WebView on mobile.</p>
+
+        <div class="flow-diagram" role="img" aria-label="Application data flow">
+          <div class="flow-row sources">
+            <div>Yahoo Finance<small>primary, polled</small></div>
+            <div>Twelve Data<small>optional fallback</small></div>
+            <div>SEC / research<small>manual enrichment</small></div>
+            <div>CSV / demo<small>local sources</small></div>
+          </div>
+          <span class="flow-arrow">↓ validated and provenance-labelled</span>
+          <div class="flow-row core">
+            <div>Domain bars</div><div>History / fundamentals stores</div>
+            <div>Indicators and analyzers</div><div>Strategies and simulation</div>
+          </div>
+          <span class="flow-arrow">↓ serialized through a bounded bridge</span>
+          <div class="flow-row clients">
+            <div>Windows Qt Widgets + WebEngine</div>
+            <div>Android Qt Quick + WebView</div>
+          </div>
+          <span class="flow-arrow">↓</span>
+          <div class="flow-row renderer"><div>Vendored Lightweight Charts 5.2.0</div></div>
+        </div>
+
+        <h2>Repository map</h2>
+        <div class="file-map">
+          <div><code>src/domain</code><p>Canonical OHLCV bar types and invariants.</p></div>
+          <div><code>src/data</code><p>Provider acquisition, parsing, quality, demo data, and history cache.</p></div>
+          <div><code>src/analysis</code><p>Indicators, risk context, market structure, and comparisons.</p></div>
+          <div><code>src/strategy</code><p>Rules, backtests, validation, replay, simulation, and safe script import.</p></div>
+          <div><code>src/fundamentals</code><p>SEC facts, valuation, screening, and event studies.</p></div>
+          <div><code>src/research</code><p>Event intelligence, organization targets, and margin scenarios.</p></div>
+          <div><code>src/portfolio</code><p>Paper ledger, valuation, performance, and risk models.</p></div>
+          <div><code>src/chart</code><p>Native-to-JavaScript bridge and desktop chart view.</p></div>
+          <div><code>src/mobile</code> + <code>qml</code><p>Android controller and compact mobile UI.</p></div>
+          <div><code>assets/web</code><p>Offline HTML/JavaScript renderer and pinned vendor bundle.</p></div>
+          <div><code>tests</code><p>Native model tests and Node tests for renderer assets.</p></div>
+          <div><code>scripts</code><p>Toolchain bootstrap and reproducible platform packaging.</p></div>
+        </div>
+
+        <h2>Design boundaries worth preserving</h2>
+        <table>
+          <thead><tr><th>Boundary</th><th>Why it exists</th><th>Review question</th></tr></thead>
+          <tbody>
+            <tr><td>Renderer ≠ data provider</td><td>Lightweight Charts draws values but supplies none.</td>
+              <td>Is every displayed value sourced and freshness-labelled?</td></tr>
+            <tr><td>Raw cache ≠ adjusted view</td><td>Corporate-action bases can be reproduced without corrupting source bars.</td>
+              <td>Did this change preserve raw stored observations?</td></tr>
+            <tr><td>Completed bars ≠ future bars</td><td>Strategies and historical validation must not look ahead.</td>
+              <td>Could data after the decision timestamp affect the decision?</td></tr>
+            <tr><td>Shared model ≠ platform UI</td><td>Android cannot honestly expose every desktop dock.</td>
+              <td>Is platform parity claimed only for behavior that exists?</td></tr>
+            <tr><td>Paper state ≠ broker state</td><td>Simulation must remain local and non-executing.</td>
+              <td>Does any path imply or attempt a real order?</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Runtime dependency chain</h2>
+        <p>The desktop executable embeds a web page through Qt WebEngine and communicates through
+          Qt WebChannel. That is why copying only <code>tradingview_chart.exe</code> fails on another
+          machine. The packaging script runs <code>windeployqt</code>, checks critical DLLs and
+          resources, then launches a smoke test from the staged directory with a restricted
+          <code>PATH</code>.</p>
+      </article>
+
+      <article class="chapter" id="workspace" data-title="Prepare the workspace">
+        <div class="chapter-kicker">Chapter 04 · Setup</div>
+        <h1>Prepare a reproducible workspace</h1>
+        <p class="lead">Start from known tools and a clean source state. Local build directories,
+          SDKs, keys, databases, and API secrets are not source code and must stay outside commits.</p>
+
+        <h2>Prerequisites</h2>
+        <div class="requirement-grid">
+          <div><strong>Git + GitHub SSH</strong><span>Clone and push without embedding credentials.</span></div>
+          <div><strong>Visual Studio 2022</strong><span>Desktop C++ workload and MSVC x64.</span></div>
+          <div><strong>PowerShell 7</strong><span>Run the repository packaging scripts.</span></div>
+          <div><strong>Python 3</strong><span>Install Qt kits through pinned aqtinstall.</span></div>
+          <div><strong>Node.js 22+</strong><span>Verify and refresh the vendored chart dependency.</span></div>
+          <div><strong>Android Studio tools</strong><span>Only required for local APK builds.</span></div>
+        </div>
+
+        <h2>Clone with the existing SSH identity</h2>
+        <pre data-language="PowerShell"><code>Set-Location (Join-Path $env:USERPROFILE 'source\repos')
+git clone git@github.com:buicongnguyen/tradingview_chart.git
+Set-Location .\tradingview_chart
+git remote -v
+git status --short --branch</code></pre>
+        <p>The expected fetch and push URL is
+          <code>git@github.com:buicongnguyen/tradingview_chart.git</code>. If an existing clone
+          uses HTTPS, switch only this repository:</p>
+        <pre data-language="PowerShell"><code>git remote set-url origin git@github.com:buicongnguyen/tradingview_chart.git
+ssh -T git@github.com</code></pre>
+
+        <h2>Verify the web dependency</h2>
+        <pre data-language="PowerShell"><code>npm ci
+npm run sync-web-deps
+npm run test:web
+git diff --exit-code</code></pre>
+        <p><code>npm ci</code> uses the lock file. The synchronization command copies the pinned
+          Lightweight Charts 5.2.0 bundle and required notices into the local renderer assets.
+          A clean diff proves committed vendor files already match the dependency declaration.</p>
+
+        <h2>Configure provider identities without committing secrets</h2>
+        <pre data-language="PowerShell"><code># Optional market-data fallback
+$env:TWELVE_DATA_API_KEY = 'session-only-value'
+
+# Optional research provider
+$env:ALPHA_VANTAGE_API_KEY = 'session-only-value'
+
+# Required identity for manual SEC requests
+$env:SEC_USER_AGENT = 'TradeChartLab personal research your-email@example.com'
+
+# Optional FRED event import
+$env:FRED_API_KEY = 'session-only-value'</code></pre>
+        <div class="callout warning">
+          <strong>Never place real values in source, examples, logs, or screenshots</strong>
+          <p>Environment variables above are process-scoped examples. The Android signing key and
+            password also stay outside Git. Losing the established signing key prevents an
+            installed Android app from accepting future upgrades under the same identity.</p>
+        </div>
+      </article>
+
+      <article class="chapter" id="windows" data-title="Build for Windows">
+        <div class="chapter-kicker">Chapter 05 · Desktop</div>
+        <h1>Build, test, and package Windows</h1>
+        <p class="lead">The reliable deliverable is the tested ZIP produced by
+          <code>package-windows.ps1</code>, not the raw executable inside the build tree.</p>
+
+        <h2>One-time Qt bootstrap</h2>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\bootstrap-qt.ps1</code></pre>
+        <p>The script installs Qt 6.8.3 under <code>.qt</code> with WebEngine, WebChannel, and
+          Positioning. It uses a repository-local Python environment and verifies the required CMake
+          modules before succeeding.</p>
+
+        <h2>Developer build</h2>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\configure-windows.ps1 -Configuration Release
+
+$cmake = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+&amp; $cmake --build .\build-release --config Release --parallel
+ctest --test-dir .\build-release -C Release --output-on-failure</code></pre>
+
+        <h2>Run from the build tree</h2>
+        <pre data-language="PowerShell"><code>$qtRoot = (Resolve-Path .\.qt\6.8.3\msvc2022_64).Path
+$env:PATH = "$qtRoot\bin;$env:PATH"
+.\build-release\Release\tradingview_chart.exe</code></pre>
+        <div class="callout important">
+          <strong>Why the Qt6WebChannel.dll error appears</strong>
+          <p>The raw executable resolves Qt libraries from <code>PATH</code>. For normal use, run
+            the executable inside <code>dist\TradeChartLab-1.2.0-win64</code> after packaging.
+            Do not solve deployment by manually copying one DLL—the application needs a complete,
+            mutually compatible Qt runtime and WebEngine resources.</p>
+        </div>
+
+        <h2>Create the self-contained package</h2>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\package-windows.ps1</code></pre>
+        <p>This command configures and builds Release, runs all native tests, stages licenses,
+          invokes <code>windeployqt</code>, asserts critical runtime files, smoke-tests the staged
+          app with a restricted environment, and creates:</p>
+        <ul>
+          <li><code>dist\TradeChartLab-1.2.0-win64.zip</code></li>
+          <li><code>dist\TradeChartLab-1.2.0-win64.zip.sha256</code></li>
+        </ul>
+
+        <h2>Manual acceptance pass</h2>
+        <ul class="check-list">
+          <li>Extract the ZIP to a new directory and start the packaged executable.</li>
+          <li>Load Yahoo data, then test offline demo and a valid local CSV.</li>
+          <li>Switch Basic, Intermediate, and Advanced workspaces and reset the layout.</li>
+          <li>Resize docks at 100%, 125%, and 150% display scaling; verify text does not overlap.</li>
+          <li>Open chart style, scale, indicators, research, strategy, and simulation flows.</li>
+          <li>Close and reopen to verify safe settings and persistence restoration.</li>
+        </ul>
+      </article>
+
+      <article class="chapter" id="android" data-title="Build for Android">
+        <div class="chapter-kicker">Chapter 06 · Mobile</div>
+        <h1>Build and sign the Android APK</h1>
+        <p class="lead">Android shares the validated data and chart concepts, but uses its own
+          Qt Quick presentation and Android-native network bridge. Desktop docks, multi-chart
+          workspaces, and tray alerts are intentionally not claimed as mobile features.</p>
+
+        <h2>Prepare the toolchain</h2>
+        <p>Install Android Studio command-line tools and JDK 17 or newer. The expected default SDK
+          location is <code>%LOCALAPPDATA%\Android\Sdk</code>. Then run:</p>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\bootstrap-android.ps1</code></pre>
+        <p>The script verifies or installs Android platform 36, build tools 36.0.0, NDK
+          26.1.10909125, platform tools, and the Qt 6.8.3 ARM64 kit with Qt WebView.</p>
+
+        <h2>Protect the application identity</h2>
+        <p>The canonical key directory is
+          <code>%LOCALAPPDATA%\TradingViewChart\signing</code>. Initialize it only once for a brand
+          new application identity:</p>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\package-android.ps1 -InitializeSigningKey</code></pre>
+        <div class="callout warning">
+          <strong>Back up the entire signing directory securely</strong>
+          <p>Do not commit it, upload it as an Actions artifact, or create a replacement when one
+            part is missing. Android requires future upgrades to use the same key.</p>
+        </div>
+
+        <h2>Create the release APK</h2>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\package-android.ps1</code></pre>
+        <p>The script builds ARM64 Release, signs with the established local material, verifies the
+          certificate, and writes the APK and checksum under <code>dist</code>. For disposable CI
+          output only:</p>
+        <pre data-language="PowerShell"><code>pwsh -NoProfile -File .\scripts\package-android.ps1 -SkipSigning</code></pre>
+
+        <h2>Device acceptance pass</h2>
+        <ol class="steps">
+          <li><strong>Install:</strong> remove only an incompatible test build if necessary, then
+            install the canonical APK on an Android 9+ ARM64 phone.</li>
+          <li><strong>Launch:</strong> confirm AAPL requests Yahoo; confirm failure visibly falls
+            back to deterministic demo data.</li>
+          <li><strong>Interact:</strong> change symbol, timeframe, chart style, indicator, and
+            provider fallback; use pinch and crosshair gestures.</li>
+          <li><strong>Rotate:</strong> verify portrait controls and the landscape chart-first layout.</li>
+          <li><strong>Constrain:</strong> test airplane mode, background/resume, slow network,
+            invalid symbol, and invalid Twelve Data key.</li>
+          <li><strong>Read:</strong> verify text is legible at system font scaling and overlays
+            remain opt-in on a small display.</li>
+        </ol>
+
+        <h2>What CI proves—and what it cannot</h2>
+        <p>The Android workflow compiles the ARM64 package, checks the manifest for Internet access
+          and absence of unexpected sensitive permissions, verifies the vendored renderer, and
+          uploads an unsigned artifact. Only a physical-device pass can prove WebView behavior,
+          rotation, touch interaction, OEM TLS/network differences, and real-world readability.</p>
+      </article>
+
+      <article class="chapter" id="quality" data-title="Test and review">
+        <div class="chapter-kicker">Chapter 07 · Evidence</div>
+        <h1>Test behavior, then review the logic</h1>
+        <p class="lead">Compilation catches syntax and type errors. It does not catch misleading
+          finance semantics, lookahead, incomplete packages, stale UI state, or unreadable layouts.</p>
+
+        <h2>The verification pyramid</h2>
+        <div class="layer-stack">
+          <div><strong>Manual acceptance</strong><span>Real workflows, displays, phones, networks</span></div>
+          <div><strong>Package smoke</strong><span>Runtime dependencies and clean-environment launch</span></div>
+          <div><strong>Integration</strong><span>Parsers, storage, bridges, workflows</span></div>
+          <div><strong>Unit and asset tests</strong><span>Math, bounds, state machines, vendored files</span></div>
+          <div><strong>Static review</strong><span>Ownership, inputs, errors, provenance, scope</span></div>
+        </div>
+
+        <h2>Run the automated suites</h2>
+        <pre data-language="PowerShell"><code>npm ci
+npm run sync-web-deps
+npm run test:web
+
+pwsh -NoProfile -File .\scripts\configure-windows.ps1 -Configuration Release
+cmake --build .\build-release --config Release --parallel
+ctest --test-dir .\build-release -C Release --output-on-failure</code></pre>
+
+        <h2>Finance-logic review</h2>
+        <table>
+          <thead><tr><th>Question</th><th>Failure it prevents</th></tr></thead>
+          <tbody>
+            <tr><td>Does a historical decision use only information available at that timestamp?</td>
+              <td>Lookahead and survivorship-style overstatement.</td></tr>
+            <tr><td>Are warm-up, missing, rejected, and non-finite values explicit?</td>
+              <td>Invented values and silent NaN propagation.</td></tr>
+            <tr><td>Are fills consistently next-open with configured cost assumptions?</td>
+              <td>Impossible same-bar execution and inflated backtests.</td></tr>
+            <tr><td>Are sample size, baseline, interval, and coverage shown with an “accuracy” claim?</td>
+              <td>False precision from a favorable hit rate.</td></tr>
+            <tr><td>Are currency, units, price basis, provider, and retrieval time preserved?</td>
+              <td>Invalid comparisons and ambiguous displayed numbers.</td></tr>
+            <tr><td>Does simulation remain local, long-only, and non-broker-connected?</td>
+              <td>Unexpected financial action.</td></tr>
+          </tbody>
+        </table>
+
+        <h2>Code review</h2>
+        <ul class="check-list">
+          <li>Inputs are bounded before allocation, parsing, serialization, or iteration.</li>
+          <li>Asynchronous callbacks cannot use deleted objects or overwrite a newer request.</li>
+          <li>Files and databases are written atomically or recover safely from partial state.</li>
+          <li>User-facing errors name the failed operation and preserve usable previous data.</li>
+          <li>Tests cover first valid index, empty/one-item input, upper bounds, malformed input, and deterministic repeats.</li>
+          <li>Desktop-only and Android-only behavior is guarded and documented honestly.</li>
+          <li>Licenses and TradingView attribution remain in packaged output.</li>
+        </ul>
+
+        <h2>UI review</h2>
+        <p>Test minimum supported window size, long translated/provider strings, system font
+          scaling, dense tables, and restored settings from older versions. Prefer scroll areas,
+          elision with tooltips, minimum useful dock widths, and task-based workspaces over forcing
+          every panel onto the screen. Basic should answer “what is happening?”; Intermediate adds
+          “why?”; Advanced adds modeling and strategy work.</p>
+      </article>
+
+      <article class="chapter" id="git-workflow" data-title="Commit and push">
+        <div class="chapter-kicker">Chapter 08 · Source control</div>
+        <h1>Make the change reviewable</h1>
+        <p class="lead">A good commit is a coherent statement: the diff, tests, documentation, and
+          commit message all describe the same outcome.</p>
+
+        <h2>Start from current main</h2>
+        <pre data-language="PowerShell"><code>git switch main
+git pull --ff-only origin main
+git switch -c codex/short-description
+git status --short --branch</code></pre>
+
+        <h2>Inspect before staging</h2>
+        <pre data-language="PowerShell"><code>git diff --check
+git diff --stat
+git diff
+git status --short</code></pre>
+        <p>Do not stage local build trees, <code>dist</code>, databases, log files, API keys,
+          Android signing material, IDE state, or unrelated user changes. Use explicit paths when
+          the worktree contains more than the intended change.</p>
+
+        <h2>Commit and push through SSH</h2>
+        <pre data-language="PowerShell"><code>git add docs .github/workflows/pages.yml tests/web/book_site.test.mjs README.md
+git diff --cached --check
+git diff --cached --stat
+git commit -m "Add project book and Pages deployment"
+git push --set-upstream origin codex/short-description</code></pre>
+
+        <h2>Open the pull request</h2>
+        <pre data-language="PowerShell"><code>gh pr create --draft `
+  --base main `
+  --head codex/short-description `
+  --title "Add project book and Pages deployment" `
+  --body "Summary, verification, risks, and deployment notes"</code></pre>
+        <p>Keep it draft while checks or review work remain. The pull request should state:</p>
+        <ul>
+          <li>the user outcome and files changed;</li>
+          <li>commands actually run and their results;</li>
+          <li>platform behavior not manually verified;</li>
+          <li>data, security, license, migration, or deployment risks;</li>
+          <li>the expected release or Pages URL after merge.</li>
+        </ul>
+
+        <div class="callout tip">
+          <strong>SSH and GitHub CLI are separate concerns</strong>
+          <p><code>git push</code> uses the repository’s SSH remote. The <code>gh</code> command
+            uses its authenticated API token to create pull requests, inspect workflows, and manage
+            releases. No remote URL conversion is needed.</p>
+        </div>
+      </article>
+
+      <article class="chapter" id="automation" data-title="Continuous integration">
+        <div class="chapter-kicker">Chapter 09 · Automation</div>
+        <h1>Let GitHub reproduce the evidence</h1>
+        <p class="lead">The repository runs independent Windows, Android, and Pages workflows.
+          A green badge means that exact revision passed the scripted gates—not that every manual
+          device or financial-semantic check has been performed.</p>
+
+        <h2>Windows workflow</h2>
+        <ol class="steps">
+          <li>Checkout source and install Node.js and Python.</li>
+          <li>Synchronize and test the vendored renderer, then require a clean diff.</li>
+          <li>Install Qt 6.8.3 for MSVC 2022 with required modules.</li>
+          <li>Run <code>scripts/package-windows.ps1</code> to build, test, deploy, and smoke-check.</li>
+          <li>Upload the ZIP and SHA-256 sidecar as workflow artifacts.</li>
+        </ol>
+
+        <h2>Android workflow</h2>
+        <ol class="steps">
+          <li>Verify the same web renderer inputs.</li>
+          <li>Install host Qt, Android Qt, JDK 17, SDK platform/build tools, and pinned NDK.</li>
+          <li>Cross-compile the ARM64 Release APK.</li>
+          <li>Inspect permissions and APK contents.</li>
+          <li>Upload a clearly labelled unsigned APK and checksum.</li>
+        </ol>
+
+        <h2>Pages workflow</h2>
+        <ol class="steps">
+          <li>Run book integrity tests for local assets, chapter targets, navigation order,
+            workflow scope, and unsafe accidental secrets.</li>
+          <li>On pull requests, stop after validation.</li>
+          <li>On <code>main</code>, upload only <code>docs</code> as the Pages artifact.</li>
+          <li>Deploy that artifact to the protected <code>github-pages</code> environment.</li>
+        </ol>
+
+        <h2>Inspect checks from the command line</h2>
+        <pre data-language="PowerShell"><code>gh pr checks --watch
+gh run list --limit 10
+gh run view RUN_ID --log-failed</code></pre>
+        <p>When a job fails, find the first meaningful error, reproduce the same command locally,
+          fix the underlying source or script, rerun the relevant full gate, and push a new commit.
+          Do not mask a deterministic failure with retries.</p>
+
+        <h2>Workflow security</h2>
+        <p>Keep default permissions read-only, then grant <code>pages: write</code> and
+          <code>id-token: write</code> only to the deploy job. Pull requests must never receive
+          signing keys. Pin tool versions where reproducibility matters, use official actions, and
+          treat workflow logs and artifacts as public for this public repository.</p>
+      </article>
+
+      <article class="chapter" id="release" data-title="Release the app">
+        <div class="chapter-kicker">Chapter 10 · Distribution</div>
+        <h1>Publish installable application artifacts</h1>
+        <p class="lead">GitHub Pages publishes documentation. GitHub Releases publishes the Windows
+          package and Android APK. Keep those responsibilities separate.</p>
+
+        <h2>Pre-release gate</h2>
+        <ul class="check-list">
+          <li>The version agrees in <code>package.json</code>, artifact names, workflows, and user documentation.</li>
+          <li>Windows and Android workflows passed on the commit to be tagged.</li>
+          <li>The local signed APK certificate was verified and the key is backed up.</li>
+          <li>ZIP and APK SHA-256 files match their final bytes.</li>
+          <li>Third-party notices, licenses, and TradingView attribution are present.</li>
+          <li>Release notes distinguish real data, delayed/polled data, and deterministic demo data.</li>
+        </ul>
+
+        <h2>Tag and create the release</h2>
+        <pre data-language="PowerShell"><code>git switch main
+git pull --ff-only origin main
+git tag -a v1.2.0 -m "TradeChart Lab 1.2.0"
+git push origin v1.2.0
+
+gh release create v1.2.0 `
+  .\dist\TradeChartLab-1.2.0-win64.zip `
+  .\dist\TradeChartLab-1.2.0-win64.zip.sha256 `
+  .\dist\TradeChartLab-1.2.0-android-arm64-v8a.apk `
+  .\dist\TradeChartLab-1.2.0-android-arm64-v8a.apk.sha256 `
+  --title "TradeChart Lab 1.2.0" `
+  --notes-file .\RELEASE_NOTES.md</code></pre>
+        <p>Replace the example version for the next release. Never move an existing public tag to a
+          different commit; create a new patch version when shipped bytes change.</p>
+
+        <h2>Verify from the public side</h2>
+        <ol class="steps">
+          <li>Open the release while signed out or in a private browser.</li>
+          <li>Download both platform artifacts and checksum sidecars.</li>
+          <li>Compute local SHA-256 and compare exact lowercase/uppercase-insensitive hex.</li>
+          <li>Extract Windows into a new folder and run it without the development Qt path.</li>
+          <li>Install the APK as an upgrade on a device that has the previous signed release.</li>
+        </ol>
+
+        <h2>Rollback model</h2>
+        <p>Do not delete evidence silently. If a release is unsafe, mark it clearly, describe the
+          issue, retain or remove assets according to impact, fix forward on a new branch, and
+          publish a new version. GitHub Pages can be restored by reverting the bad documentation
+          commit and letting the Pages workflow redeploy <code>main</code>.</p>
+      </article>
+
+      <article class="chapter" id="pages" data-title="Deploy this book">
+        <div class="chapter-kicker">Chapter 11 · GitHub Pages</div>
+        <h1>Deploy this book to github.io</h1>
+        <p class="lead">The site is plain HTML, CSS, and JavaScript. It has no runtime CDN and no
+          static-site build step, so the repository itself contains the exact files deployed.</p>
+
+        <h2>Publishing flow</h2>
+        <div class="publish-flow">
+          <div><strong>Pull request</strong><span>Validate book structure</span></div>
+          <i>→</i>
+          <div><strong>Merge to main</strong><span>Trusted deployment source</span></div>
+          <i>→</i>
+          <div><strong>Pages artifact</strong><span>Only the docs directory</span></div>
+          <i>→</i>
+          <div><strong>github-pages</strong><span>Public environment</span></div>
+        </div>
+
+        <h2>Workflow anatomy</h2>
+        <pre data-language="YAML"><code>on:
+  push:
+    branches: [main]
+    paths: [docs/**, tests/web/book_site.test.mjs, .github/workflows/pages.yml]
+  pull_request:
+    paths: [docs/**, tests/web/book_site.test.mjs, .github/workflows/pages.yml]
+  workflow_dispatch:</code></pre>
+        <p>The validation job runs for pull requests and <code>main</code>. Artifact upload and
+          deployment run only after a trusted push or manual dispatch—not for forked pull requests.
+          Deployment uses the official Pages actions and the minimum required write permissions.</p>
+
+        <h2>Enable Pages for Actions</h2>
+        <p>The repository owner enables GitHub Pages once with <strong>GitHub Actions</strong> as
+          the build source. This can be done in <strong>Settings → Pages → Build and deployment</strong>
+          or through the GitHub API. The workflow then maintains all future deployments.</p>
+
+        <h2>Expected public URL</h2>
+        <p class="url-card"><a href="https://buicongnguyen.github.io/tradingview_chart/"
+          target="_blank" rel="noreferrer">https://buicongnguyen.github.io/tradingview_chart/</a></p>
+
+        <h2>Verify the deployment</h2>
+        <pre data-language="PowerShell"><code>gh run list --workflow Pages --limit 5
+gh run watch RUN_ID --exit-status
+gh api repos/buicongnguyen/tradingview_chart/pages --jq '.html_url'</code></pre>
+        <p>Then open the URL in a private browser, navigate every chapter, search for “Android,”
+          switch theme, reload a deep link such as <code>#quality</code>, test a phone-sized
+          viewport, and confirm repository/release links leave the book safely.</p>
+
+        <div class="callout tip">
+          <strong>Why <code>.nojekyll</code> is present</strong>
+          <p>The marker tells GitHub Pages to serve this already-complete static directory without
+            Jekyll transformation. It reduces the difference between local files and public output.</p>
+        </div>
+      </article>
+
+      <article class="chapter" id="operate" data-title="Operate and improve">
+        <div class="chapter-kicker">Chapter 12 · Maintenance</div>
+        <h1>Keep the app and book trustworthy</h1>
+        <p class="lead">A release is a checkpoint, not the end. Provider behavior, upstream
+          dependencies, Android requirements, market semantics, and user workflows continue to
+          change.</p>
+
+        <h2>Troubleshooting map</h2>
+        <div class="troubleshoot">
+          <details>
+            <summary>Windows reports a missing Qt DLL</summary>
+            <p>Run the packaged executable from the extracted <code>dist</code> folder. Rebuild with
+              <code>scripts/package-windows.ps1</code> if the folder was assembled manually. One
+              copied DLL cannot replace WebEngine resources, plugins, and matching runtime libraries.</p>
+          </details>
+          <details>
+            <summary>The chart shows demo values instead of real market data</summary>
+            <p>Read the visible source label. Yahoo may be unavailable or rate-limited; Twelve Data
+              requires a valid key and plan entitlement. Demo data is deterministic and explicitly
+              labelled. Lightweight Charts itself never retrieves quotes.</p>
+          </details>
+          <details>
+            <summary>The Android APK will not install as an upgrade</summary>
+            <p>Confirm application ID, version code, device ABI, minimum Android level, and signing
+              certificate. An APK signed with a different key cannot upgrade the installed app.</p>
+          </details>
+          <details>
+            <summary>A historical theory reports high accuracy</summary>
+            <p>Inspect sample size, Wilson interval, holdout result, unconditional baseline, excess
+              return, event overlap, costs, and regime coverage. A hit rate alone is not a forecast
+              or a reason to buy.</p>
+          </details>
+          <details>
+            <summary>The GitHub Pages workflow fails</summary>
+            <p>Run <code>npm run test:web</code>, inspect the first failed assertion, verify Pages is
+              enabled with Actions as its source, and confirm deploy-job permissions and the
+              <code>github-pages</code> environment.</p>
+          </details>
+        </div>
+
+        <h2>Dependency update rhythm</h2>
+        <ol class="steps">
+          <li>Read official release notes and security advisories for Qt, Lightweight Charts,
+            Node, Android SDK/NDK, and GitHub Actions.</li>
+          <li>Update one dependency boundary at a time on a branch.</li>
+          <li>Regenerate pinned assets or lock files with the repository command.</li>
+          <li>Run native, web, Windows package, Android package, and license checks.</li>
+          <li>Document user-visible or toolchain changes in both README and this book.</li>
+        </ol>
+
+        <h2>Book maintenance checklist</h2>
+        <ul class="check-list">
+          <li>Commands still match script names, parameters, paths, and versions.</li>
+          <li>Platform capability descriptions match current code.</li>
+          <li>Artifact names and release examples use the supported version.</li>
+          <li>Provider descriptions distinguish official, unofficial, free-plan, and manual sources.</li>
+          <li>New workflows and required permissions appear in the delivery chapters.</li>
+          <li>Every new chapter is represented in navigation, search, tests, and previous/next order.</li>
+        </ul>
+
+        <h2>Final handoff checklist</h2>
+        <div class="final-checklist">
+          <label><input type="checkbox" data-check="source"> Source is clean and reviewable</label>
+          <label><input type="checkbox" data-check="tests"> Automated checks pass</label>
+          <label><input type="checkbox" data-check="windows"> Windows package starts cleanly</label>
+          <label><input type="checkbox" data-check="android"> Signed APK passes device checks</label>
+          <label><input type="checkbox" data-check="release"> Release downloads and hashes verified</label>
+          <label><input type="checkbox" data-check="pages"> Public book URL verified</label>
+        </div>
+
+        <div class="closing">
+          <span>TradeChart Lab</span>
+          <h2>Measure twice. Ship evidence.</h2>
+          <p>Keep the application useful by keeping its boundaries visible: source, timestamp,
+            assumptions, uncertainty, and platform scope.</p>
+        </div>
+      </article>
+
+      <footer class="chapter-footer">
+        <button id="previous-chapter" class="chapter-link previous" type="button">
+          <span>Previous</span><strong></strong>
+        </button>
+        <button id="mark-complete" class="complete-button" type="button">
+          <span class="complete-icon">✓</span><span class="complete-label">Mark complete</span>
+        </button>
+        <button id="next-chapter" class="chapter-link next" type="button">
+          <span>Next</span><strong></strong>
+        </button>
+      </footer>
+    </main>
+  </div>
+
+  <noscript>
+    <div class="noscript">JavaScript is disabled. All chapters are still available by scrolling,
+      but search, saved progress, theme switching, and chapter paging require JavaScript.</div>
+  </noscript>
+</body>
+</html>
